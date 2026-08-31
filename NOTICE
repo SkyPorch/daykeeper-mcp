@@ -1,0 +1,6 @@
+Daykeeper MCP
+Copyright 2026 SkyPorch
+
+Input validation and error-normalization patterns are derived from the
+Apache-2.0-licensed Daykeeper CLI. The management transport is provided by
+the separately versioned @skyporch/daykeeper SDK.

@@ -1,4 +1,12 @@
-import { type TenantSpec, type EmailChannelSpec } from "@skyporch/daykeeper";
+import {
+  DAYKEEPER_FLOW_SCHEMA_VERSION,
+  type CreateFlowInput,
+  type CreateFlowVersionInput,
+  type EmailChannelSpec,
+  type FlowDefinition,
+  type PublishFlowVersionInput,
+  type TenantSpec,
+} from "@skyporch/daykeeper";
 import { z } from "zod";
 
 const text = (minimum: number, maximum: number) =>
@@ -40,6 +48,65 @@ export const emailChannelSpec = z.strictObject({
     .enum(["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"])
     .optional(),
 }) satisfies z.ZodType<EmailChannelSpec>;
+const flowActionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/);
+const flowAction = z.discriminatedUnion("type", [
+  z.strictObject({
+    id: flowActionId,
+    type: z.literal("reply"),
+    text: text(1, 4_000),
+  }),
+  z.strictObject({
+    id: flowActionId,
+    type: z.literal("tag"),
+    tag: text(1, 120),
+  }),
+  z.strictObject({
+    id: flowActionId,
+    type: z.literal("handoff"),
+    target: z.enum(["agent", "human", "hybrid"]),
+  }),
+  z.strictObject({
+    id: flowActionId,
+    type: z.literal("set_priority"),
+    priority: z.enum(["low", "medium", "high", "urgent"]),
+  }),
+]);
+export const flowDefinition = z.strictObject({
+  schemaVersion: z.literal(DAYKEEPER_FLOW_SCHEMA_VERSION),
+  trigger: z.strictObject({
+    event: z.enum(["conversation.created", "message.received"]),
+    channel: z.literal("email"),
+  }),
+  conditions: z
+    .array(
+      z.strictObject({
+        field: z.enum([
+          "contact.email_domain",
+          "conversation.tag",
+          "message.text",
+        ]),
+        operator: z.enum(["equals", "contains", "ends_with"]),
+        value: text(1, 512),
+      }),
+    )
+    .max(32),
+  actions: z.array(flowAction).min(1).max(32),
+}) satisfies z.ZodType<FlowDefinition>;
+
+export const createFlowInput = z.strictObject({
+  name,
+  slug,
+  description: text(1, 500).optional(),
+  definition: flowDefinition,
+}) satisfies z.ZodType<CreateFlowInput>;
+export const createFlowVersionInput = z.strictObject({
+  expectedLatestVersion: integer,
+  definition: flowDefinition,
+}) satisfies z.ZodType<CreateFlowVersionInput>;
+export const publishFlowVersionInput = z.strictObject({
+  expectedResourceVersion: integer,
+}) satisfies z.ZodType<PublishFlowVersionInput>;
+
 export const outputSchema = z
   .strictObject({
     schemaVersion: z.literal("1.0"),

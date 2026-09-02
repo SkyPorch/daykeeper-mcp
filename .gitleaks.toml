@@ -1,0 +1,17 @@
+# Gitleaks configuration for daykeeper-mcp.
+#
+# The history scan in CI walks every commit, so an allowlist pinned to a commit
+# SHA breaks the moment that commit is squashed or rebased. This allowlist is
+# keyed on path and rule id instead, so it survives history rewrites.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Reviewed synthetic fixture credential in the test harness. It carries an
+explicit fixture marker, has no routable authority, and is retained only for
+credential-redaction tests.
+"""
+targetRules = ["generic-api-key"]
+paths = ['''test/helpers\.ts''']

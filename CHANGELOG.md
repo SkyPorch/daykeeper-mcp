@@ -6,6 +6,7 @@
 - Add eight read tools and separately gated planning and mutation tools.
 - Preserve plan/version/idempotency boundaries with no automatic request replay.
 - Add structured, redacted results, bounded transport, cancellation and concurrency.
+- Withhold flow writes until their API contracts support idempotent retries.
 - Accept exactly one `DAYKEEPER_API_KEY` for static headless use or
   `DAYKEEPER_ACCESS_TOKEN` for OAuth, with no credential arguments or fallback.
 - Verify modern/legacy MCP clients and the actual packed executable without live credentials.

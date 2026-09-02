@@ -164,9 +164,14 @@ export async function verifyExecutable(bin) {
         );
         try {
           await client.connect(transport, { timeout: 5_000 });
+          assert.match(client.getInstructions() ?? "", /show the exact plan/);
+          assert.match(
+            client.getInstructions() ?? "",
+            /Never infer permission/,
+          );
           const before = requests.length;
           const tools = await client.listTools();
-          assert.equal(tools.tools.length, mutations ? 14 : 8);
+          assert.equal(tools.tools.length, mutations ? 11 : 8);
           const resource = await client.readResource({
             uri: "daykeeper://adapter/capabilities",
           });

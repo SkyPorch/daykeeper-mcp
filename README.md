@@ -88,6 +88,10 @@ and tarball, pass checks, set the reviewed version/changelog and `private: false
 and set `DAYKEEPER_RELEASE_APPROVED=1`. Documentation of a package name is not
 proof it is available from the registry.
 
+CI scans the complete candidate history with a checksum-pinned Gitleaks binary.
+The one ignored fingerprint is an exact historical synthetic fixture credential;
+new matches, including other matches in the same test file, still fail the gate.
+
 The Resend-inspired destination is a hosted MCP service with explicit OAuth
 consent/delegation and this scoped headless fallback. This local adapter accepts
 an already-issued API key; it does not implement OAuth, owner signup, API-key creation/revocation, customer-session

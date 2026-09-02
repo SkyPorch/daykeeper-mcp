@@ -1,0 +1,3 @@
+# Reviewed synthetic fixture credential. It contains an explicit fixture marker,
+# has no routable authority, and is retained only for credential-redaction tests.
+0d06915a6c147215f088f16055e64454f9f452ca:test/helpers.ts:generic-api-key:21

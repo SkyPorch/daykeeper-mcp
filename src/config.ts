@@ -12,8 +12,20 @@ interface DaykeeperMcpBaseOptions {
   timeoutMs?: number;
   enablePlanning?: boolean;
   enableMutations?: boolean;
+  /** Second, independent gate for flow create/revise/publish writes. */
+  enableFlowWrites?: boolean;
+  /**
+   * The exact scopes the configured credential is known to hold. Omitted means
+   * the operator did not declare them; flow writes then refuse rather than
+   * guess. This never grants anything: the API remains the authority.
+   */
+  scopes?: readonly string[];
   fetch?: typeof globalThis.fetch;
 }
+
+// Matches the scope names published by the management SDK contract.
+const SCOPE_PATTERN = /^daykeeper\.[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/;
+const MAX_SCOPES = 32;
 
 export type DaykeeperMcpOptions = DaykeeperMcpBaseOptions &
   (
@@ -37,6 +49,9 @@ export interface DaykeeperMcpConfig {
   readonly timeoutMs: number;
   readonly enablePlanning: boolean;
   readonly enableMutations: boolean;
+  readonly enableFlowWrites: boolean;
+  /** Undefined when the operator declared no scope list. */
+  readonly scopes: readonly string[] | undefined;
 }
 
 export function validateOptions(
@@ -75,10 +90,15 @@ export function validateOptions(
     const timeoutMs = options.timeoutMs ?? 30_000;
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 60_000)
       throw invalidConfig();
-    for (const flag of [options.enablePlanning, options.enableMutations]) {
+    for (const flag of [
+      options.enablePlanning,
+      options.enableMutations,
+      options.enableFlowWrites,
+    ]) {
       if (flag !== undefined && typeof flag !== "boolean")
         throw invalidConfig();
     }
+    const scopes = normalizeScopes(options.scopes);
     return Object.freeze({
       baseUrl: url.href.replace(/\/$/, ""),
       accessToken: credential,
@@ -86,6 +106,8 @@ export function validateOptions(
       timeoutMs,
       enablePlanning: options.enablePlanning ?? false,
       enableMutations: options.enableMutations ?? false,
+      enableFlowWrites: options.enableFlowWrites ?? false,
+      scopes,
     });
   } catch {
     throw invalidConfig();
@@ -104,6 +126,11 @@ export function readEnvironment(
   const timeout = environment.DAYKEEPER_TIMEOUT_MS;
   if (timeout !== undefined && !/^[1-9][0-9]*$/.test(timeout))
     throw invalidConfig();
+  const declared = environment.DAYKEEPER_MCP_SCOPES;
+  const scopes =
+    declared === undefined
+      ? undefined
+      : declared.split(",").map((entry) => entry.trim());
   const apiKey = environment.DAYKEEPER_API_KEY;
   const accessToken = environment.DAYKEEPER_ACCESS_TOKEN;
   if ((apiKey === undefined) === (accessToken === undefined))
@@ -114,6 +141,8 @@ export function readEnvironment(
     timeoutMs: timeout === undefined ? undefined : Number(timeout),
     enablePlanning: flag("DAYKEEPER_MCP_ENABLE_PLANNING"),
     enableMutations: flag("DAYKEEPER_MCP_ENABLE_MUTATIONS"),
+    enableFlowWrites: flag("DAYKEEPER_MCP_ENABLE_FLOW_WRITES"),
+    ...(scopes === undefined ? {} : { scopes }),
   };
   const config = validateOptions(options);
   return Object.freeze({
@@ -124,7 +153,22 @@ export function readEnvironment(
     timeoutMs: config.timeoutMs,
     enablePlanning: config.enablePlanning,
     enableMutations: config.enableMutations,
+    enableFlowWrites: config.enableFlowWrites,
+    ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
+}
+
+function normalizeScopes(
+  scopes: readonly string[] | undefined,
+): readonly string[] | undefined {
+  if (scopes === undefined) return undefined;
+  if (!Array.isArray(scopes) || scopes.length > MAX_SCOPES)
+    throw invalidConfig();
+  for (const scope of scopes) {
+    if (typeof scope !== "string" || !SCOPE_PATTERN.test(scope))
+      throw invalidConfig();
+  }
+  return Object.freeze([...new Set(scopes)].sort());
 }
 
 function invalidConfig(): McpAdapterError {

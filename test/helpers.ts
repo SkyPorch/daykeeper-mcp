@@ -33,17 +33,23 @@ export async function harness(
   options: Partial<DaykeeperMcpOptions> = {},
   era: "legacy" | "modern" = "legacy",
 ) {
+  const { apiKey, accessToken, ...settings } = options;
+  const credential =
+    apiKey !== undefined
+      ? { apiKey }
+      : { accessToken: accessToken ?? defaults.accessToken };
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   const server = serveStdio(
     () =>
       createDaykeeperMcpServer({
-        ...defaults,
+        baseUrl: defaults.baseUrl,
         fetch: async () => {
           throw new Error("Unexpected network dispatch");
         },
-        ...options,
-      }),
+        ...settings,
+        ...credential,
+      } as DaykeeperMcpOptions),
     { transport: serverTransport, legacy: "serve", maxSubscriptions: 0 },
   );
   const client = new Client(

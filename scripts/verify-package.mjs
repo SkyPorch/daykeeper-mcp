@@ -88,7 +88,7 @@ try {
     const file = join(extracted, `consumer.${extension}`);
     await writeFile(
       file,
-      `import { createDaykeeperMcpServer, type DaykeeperMcpOptions } from '@skyporch/daykeeper-mcp';\nconst options: DaykeeperMcpOptions = {baseUrl:'https://api.example.test', accessToken:'synthetic-type-check-token'};\nconst server = createDaykeeperMcpServer(options);\nvoid server.close();\n`,
+      `import { createDaykeeperMcpServer, type DaykeeperMcpOptions } from '@skyporch/daykeeper-mcp';\nconst oauth: DaykeeperMcpOptions = {baseUrl:'https://api.example.test', accessToken:'synthetic-type-check-token'};\nconst apiKey: DaykeeperMcpOptions = {baseUrl:'https://api.example.test', apiKey:'synthetic-type-check-api-key'};\n// @ts-expect-error Configure exactly one credential mode.\nconst ambiguous: DaykeeperMcpOptions = {baseUrl:'https://api.example.test', apiKey:'synthetic-type-check-api-key', accessToken:'synthetic-type-check-token'};\nconst server = createDaykeeperMcpServer(apiKey);\nvoid oauth; void ambiguous; void server.close();\n`,
     );
     execFileSync(
       resolve("node_modules/.bin/tsc"),

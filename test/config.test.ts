@@ -10,12 +10,55 @@ test("configuration is immutable, credential-scoped, read-only and bounded by de
   assert.equal(config.enableMutations, false);
   assert.equal(config.timeoutMs, 30_000);
   assert.equal(config.baseUrl, defaults.baseUrl);
+  assert.equal(config.credentialMode, "access_token");
+  assert.equal(config.accessToken, TOKEN);
   assert.deepEqual(
-    readEnvironment({
-      DAYKEEPER_API_URL: defaults.baseUrl,
-      DAYKEEPER_ACCESS_TOKEN: TOKEN,
-    }),
+    validateOptions(
+      readEnvironment({
+        DAYKEEPER_API_URL: defaults.baseUrl,
+        DAYKEEPER_ACCESS_TOKEN: TOKEN,
+      }),
+    ),
     config,
+  );
+});
+
+test("accepts one Resend-style API key and rejects ambiguous credential configuration", () => {
+  const apiKeyConfig = validateOptions({
+    baseUrl: defaults.baseUrl,
+    apiKey: TOKEN,
+  });
+  assert.equal(apiKeyConfig.credentialMode, "api_key");
+  assert.equal(apiKeyConfig.accessToken, TOKEN);
+  assert.deepEqual(
+    validateOptions(
+      readEnvironment({
+        DAYKEEPER_API_URL: defaults.baseUrl,
+        DAYKEEPER_API_KEY: TOKEN,
+      }),
+    ),
+    apiKeyConfig,
+  );
+  for (const options of [
+    { baseUrl: defaults.baseUrl },
+    { baseUrl: defaults.baseUrl, apiKey: TOKEN, accessToken: TOKEN },
+  ]) {
+    assert.throws(
+      () =>
+        validateOptions(
+          options as unknown as Parameters<typeof validateOptions>[0],
+        ),
+      { code: "INVALID_CONFIGURATION" },
+    );
+  }
+  assert.throws(
+    () =>
+      readEnvironment({
+        DAYKEEPER_API_URL: defaults.baseUrl,
+        DAYKEEPER_API_KEY: TOKEN,
+        DAYKEEPER_ACCESS_TOKEN: TOKEN,
+      }),
+    { code: "INVALID_CONFIGURATION" },
   );
 });
 
@@ -70,6 +113,18 @@ for (const accessToken of [
   });
 }
 
+test("invalid API keys are rejected without being echoed", () => {
+  const apiKey = "invalid api key value that must stay private";
+  assert.throws(
+    () => validateOptions({ baseUrl: defaults.baseUrl, apiKey }),
+    (error) =>
+      error instanceof Error &&
+      !error.message.includes(apiKey) &&
+      "code" in error &&
+      error.code === "INVALID_CONFIGURATION",
+  );
+});
+
 test("environment flags require explicit true/false and timeout requires a bounded integer", () => {
   const environment = {
     DAYKEEPER_API_URL: defaults.baseUrl,
@@ -101,12 +156,14 @@ test("environment flags require explicit true/false and timeout requires a bound
     );
   }
   assert.equal(
-    readEnvironment({
-      ...environment,
-      DAYKEEPER_MCP_ENABLE_MUTATIONS: "true",
-      DAYKEEPER_MCP_ENABLE_PLANNING: "false",
-      DAYKEEPER_TIMEOUT_MS: "1000",
-    }).timeoutMs,
+    validateOptions(
+      readEnvironment({
+        ...environment,
+        DAYKEEPER_MCP_ENABLE_MUTATIONS: "true",
+        DAYKEEPER_MCP_ENABLE_PLANNING: "false",
+        DAYKEEPER_TIMEOUT_MS: "1000",
+      }),
+    ).timeoutMs,
     1_000,
   );
   assert.equal(

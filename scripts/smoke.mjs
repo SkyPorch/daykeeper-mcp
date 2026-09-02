@@ -54,6 +54,8 @@ export async function verifyExecutable(bin) {
   const help = await command(bin, ["--help"]);
   assert.equal(help.exitCode, 0);
   assert.match(help.stdout, /stdio only/);
+  assert.match(help.stdout, /DAYKEEPER_API_KEY/);
+  assert.match(help.stdout, /DAYKEEPER_ACCESS_TOKEN/);
   assert.equal(help.stderr, "");
   assert.equal((await command(bin, ["--version"])).stdout.trim(), "0.1.0");
   for (const args of [[], ["--access-token", TOKEN]]) {
@@ -145,7 +147,7 @@ export async function verifyExecutable(bin) {
           env: {
             PATH: process.env.PATH ?? "",
             DAYKEEPER_API_URL: `http://127.0.0.1:${address.port}/proxy`,
-            DAYKEEPER_ACCESS_TOKEN: TOKEN,
+            DAYKEEPER_API_KEY: TOKEN,
             DAYKEEPER_MCP_ENABLE_MUTATIONS: String(mutations),
           },
         });
@@ -169,6 +171,12 @@ export async function verifyExecutable(bin) {
             uri: "daykeeper://adapter/capabilities",
           });
           assert(!JSON.stringify(resource).includes(TOKEN));
+          const capabilityContent = resource.contents[0];
+          assert("text" in capabilityContent);
+          assert.equal(
+            JSON.parse(capabilityContent.text).credentialMode,
+            "api_key",
+          );
           assert.equal(
             requests.length,
             before,

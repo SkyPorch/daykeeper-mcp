@@ -48,6 +48,7 @@ for (const era of ["legacy", "modern"] as const) {
     assert.equal(metadata.transport, "stdio");
     assert.equal(metadata.hostedOAuth, false);
     assert.equal(metadata.credentialIssuance, false);
+    assert.equal(metadata.credentialMode, "access_token");
     assert.equal(metadata.automaticRetries, false);
     assert.equal(metadata.tools.length, 16);
     assert.equal(

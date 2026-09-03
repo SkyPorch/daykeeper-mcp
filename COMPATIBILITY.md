@@ -8,9 +8,9 @@ Contract releases are immutable tags `vMAJOR.MINOR.PATCH`. Every row records the
 exact contract tag and the commit that tag points at, so a published package can
 always be traced back to the contract it was built against.
 
-| daykeeper-mcp | Management contract | Contract tag | Contract commit | `@skyporch/daykeeper` |
-| --- | --- | --- | --- | --- |
-| 0.1.0 (unreleased) | 0.2.0 | `v0.2.0` (pending; not yet tagged) | pending — record the SHA before release | 0.1.0 |
+| daykeeper-mcp      | Management contract | Contract tag                       | Contract commit                         | `@skyporch/daykeeper` |
+| ------------------ | ------------------- | ---------------------------------- | --------------------------------------- | --------------------- |
+| 0.1.0 (unreleased) | 0.2.0               | `v0.2.0` (pending; not yet tagged) | pending — record the SHA before release | 0.1.0                 |
 
 ## Notes
 

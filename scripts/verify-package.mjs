@@ -153,9 +153,11 @@ try {
     if (!file.endsWith(".map")) continue;
     maps += 1;
     const map = JSON.parse(await readFile(join(first.root, file), "utf8"));
+    assert(Array.isArray(map.sources), `Source map has no sources: ${file}`);
     assert(
-      Array.isArray(map.sources) && map.sources.length > 0,
-      `Source map has no sources: ${file}`,
+      Array.isArray(map.sourcesContent) &&
+        map.sourcesContent.length === map.sources.length,
+      `Source map must inline sourcesContent: ${file}`,
     );
     for (const source of map.sources) {
       assert(

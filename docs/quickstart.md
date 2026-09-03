@@ -6,16 +6,16 @@ there are no credential arguments.
 
 ## Environment
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `DAYKEEPER_API_URL` | yes | Base URL of the management API. |
-| `DAYKEEPER_API_KEY` | one of | Scoped static credential for headless use. |
-| `DAYKEEPER_ACCESS_TOKEN` | one of | Short-lived OAuth token supplied by the host. |
-| `DAYKEEPER_MCP_ENABLE_PLANNING` | no | Exposes the planning tools. |
-| `DAYKEEPER_MCP_ENABLE_MUTATIONS` | no | Exposes the mutation tools. |
-| `DAYKEEPER_MCP_ENABLE_FLOW_WRITES` | no | Second gate for flow create/revise/publish. |
-| `DAYKEEPER_MCP_SCOPES` | with flow writes | Comma-separated list of the exact scopes the credential holds. |
-| `DAYKEEPER_TIMEOUT_MS` | no | Request timeout override, in milliseconds. |
+| Variable                           | Required         | Purpose                                                        |
+| ---------------------------------- | ---------------- | -------------------------------------------------------------- |
+| `DAYKEEPER_API_URL`                | yes              | Base URL of the management API.                                |
+| `DAYKEEPER_API_KEY`                | one of           | Scoped static credential for headless use.                     |
+| `DAYKEEPER_ACCESS_TOKEN`           | one of           | Short-lived OAuth token supplied by the host.                  |
+| `DAYKEEPER_MCP_ENABLE_PLANNING`    | no               | Exposes the planning tools.                                    |
+| `DAYKEEPER_MCP_ENABLE_MUTATIONS`   | no               | Exposes the mutation tools.                                    |
+| `DAYKEEPER_MCP_ENABLE_FLOW_WRITES` | no               | Second gate for flow create/revise/publish.                    |
+| `DAYKEEPER_MCP_SCOPES`             | with flow writes | Comma-separated list of the exact scopes the credential holds. |
+| `DAYKEEPER_TIMEOUT_MS`             | no               | Request timeout override, in milliseconds.                     |
 
 Configure exactly one of `DAYKEEPER_API_KEY` or `DAYKEEPER_ACCESS_TOKEN`. The
 server refuses to start when both or neither are set.

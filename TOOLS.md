@@ -35,11 +35,14 @@ invoked by name. The resource catalog still describes them so hosts can explain
 what is missing.
 
 `DAYKEEPER_MCP_SCOPES` declares the exact scopes the configured credential
-holds. When it is set, any tool whose required scope is missing is refused
-locally with `SCOPE_NOT_GRANTED` before dispatch. Flow writes additionally
-refuse with `SCOPES_NOT_DECLARED` when the list is absent. This is a second
-local refusal, never a grant: the API still enforces principal, scope and
-tenant ownership.
+holds. When it is set, any **write** tool whose required scope is missing is
+refused locally with `SCOPE_NOT_GRANTED` before dispatch, and flow writes
+additionally refuse with `SCOPES_NOT_DECLARED` when the list is absent. Read
+tools are never gated by the declared list: inspecting a flow or version is how
+an operator recovers from an uncertain write, so a minimal write scope list must
+not disable `daykeeper_flows_get`. This is a second local refusal, never a
+grant: the API still enforces principal, scope and tenant ownership on every
+call, reads included.
 
 Apply requires `{planId, planVersion, idempotencyKey}`. The key is 16–128
 characters drawn from letters, digits, `.`, `_`, `:`, and `-`; it is carried in

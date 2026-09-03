@@ -105,8 +105,10 @@ Flow creation, revision and publication are available only behind two gates.
 `DAYKEEPER_MCP_ENABLE_MUTATIONS=true` alone does not expose them: they also need
 `DAYKEEPER_MCP_ENABLE_FLOW_WRITES=true`, and `DAYKEEPER_MCP_SCOPES` must declare
 the exact scope each one needs (`daykeeper.flows:write` for create and revise,
-`daykeeper.flows:publish` for publish). The adapter refuses the call locally
-when a scope is not declared; the API still makes the real decision.
+`daykeeper.flows:publish` for publish). The adapter refuses a write locally when
+its scope is not declared. Reads are never refused by that list, so the
+inspection tools stay usable under a minimal write scope list; the API still
+makes the real decision on every call.
 
 Each flow write requires the caller to supply an `idempotencyKey`: one key per
 intended mutation, and the same key again on any retry. The adapter never

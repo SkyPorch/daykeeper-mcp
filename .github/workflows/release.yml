@@ -3,13 +3,29 @@ name: Stage npm release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Rehearse the release. Runs everything up to and including
+          `npm publish --dry-run --provenance`, and never publishes or stages.
+        type: boolean
+        default: true
+        required: false
+      ref:
+        description: Ref to check out for the dry run. Defaults to this run's ref.
+        type: string
+        default: ""
+        required: false
 
 permissions:
   contents: read
 
 jobs:
   stage:
-    if: startsWith(github.event.release.tag_name, 'v')
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: daykeeper-npm-production
@@ -19,11 +35,22 @@ jobs:
       id-token: write
     env:
       DAYKEEPER_RELEASE_APPROVED: ${{ vars.DAYKEEPER_RELEASE_APPROVED }}
+      # A manual run is always a rehearsal. A release event is never one.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
+      # A manual run may only ever rehearse. Refuse a dispatch that asks to
+      # publish for real: the ancestor-of-main gate below cannot protect it,
+      # because a dispatch has no release tag to verify.
+      - name: Refuse a non-dry-run manual dispatch
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run != true
+        run: |
+          echo "::error::workflow_dispatch may only run with dry_run=true. Publish by creating a GitHub Release from a tag on main." >&2
+          exit 1
       # A release can be published from any tag, including one pushed to an
       # unreviewed branch or to no branch at all. Prove the tag is on main
       # before any repository code is checked out or executed.
       - name: Check out main for tag verification
+        if: github.event_name == 'release'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: main
@@ -31,6 +58,7 @@ jobs:
           # Credentials are kept only so the verification step below can fetch
           # the tag ref; they are dropped again for the tag checkout.
       - name: Verify the release tag is an ancestor of main
+        if: github.event_name == 'release'
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           TARGET_COMMITISH: ${{ github.event.release.target_commitish }}
@@ -54,7 +82,7 @@ jobs:
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref || github.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
         with:
@@ -68,5 +96,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: node scripts/verify-release.mjs
+      - name: Rehearse publish (dry run only; publishes nothing)
+        if: env.DRY_RUN == 'true'
+        run: npm publish --dry-run --provenance --access public --tag latest
       - name: Stage package for npm review
+        if: env.DRY_RUN != 'true'
         run: npm stage publish --access public --provenance --tag "${{ github.event.release.prerelease && 'next' || 'latest' }}"

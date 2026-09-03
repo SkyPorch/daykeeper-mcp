@@ -15,6 +15,7 @@ import {
 import type { DaykeeperMcpConfig } from "./config.ts";
 import { McpAdapterError } from "./errors.ts";
 import {
+  assertFlowWriteSdk,
   idempotentFlows,
   isIdempotencyKeyReused,
   isOutcomeUnknown,
@@ -40,8 +41,14 @@ export type Execute = (
   work: (client: DaykeeperClient) => Promise<unknown>,
   signal: AbortSignal,
 ) => Promise<CallToolResult>;
-interface ToolDefinition {
+export interface ToolDefinition {
   metadata: Readonly<ToolMetadata>;
+  /**
+   * Validates one tool input and runs its SDK call. Exposed so the dispatch
+   * pipeline can be exercised directly against a client stub, independently of
+   * the MCP protocol layer and of the installed SDK.
+   */
+  dispatch(client: DaykeeperClient, input: unknown): Promise<unknown>;
   register(server: McpServer, execute: Execute): void;
 }
 
@@ -55,6 +62,9 @@ function define<Schema extends z.ZodType>(
 ): ToolDefinition {
   return {
     metadata: Object.freeze(metadata),
+    dispatch(client, input) {
+      return dispatch(client, inputSchema.parse(input));
+    },
     register(server, execute) {
       server.registerTool<typeof outputSchema, SafeInputSchema>(
         metadata.name,
@@ -73,7 +83,7 @@ function define<Schema extends z.ZodType>(
           execute(
             metadata,
             input,
-            (client) => dispatch(client, inputSchema.parse(input)),
+            (client) => this.dispatch(client, input),
             context.mcpReq.signal,
           ),
       );
@@ -455,6 +465,9 @@ export function toolEnabled(
   );
 }
 
+/** Exposed for direct dispatch coverage; not part of the package's public API. */
+export const toolDefinitions: readonly ToolDefinition[] = definitions;
+
 export function toolCatalog(config: DaykeeperMcpConfig) {
   return definitions.map(({ metadata }) => ({
     ...metadata,
@@ -469,7 +482,9 @@ export function registerTools(
   execute: Execute,
 ): void {
   for (const definition of definitions) {
-    if (toolEnabled(definition.metadata, config))
-      definition.register(server, execute);
+    if (!toolEnabled(definition.metadata, config)) continue;
+    // Never wire a flow write to an SDK whose mutations cannot carry a key.
+    if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
+    definition.register(server, execute);
   }
 }

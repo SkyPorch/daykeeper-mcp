@@ -74,9 +74,14 @@ export function assertFlowWriteSdk(
   );
 }
 
-/** Never widens authorization; it only exposes the key-carrying signatures. */
+/**
+ * Never widens authorization; it only exposes the key-carrying signatures. The
+ * SDK is asserted where the tools are wired up, not here: a flow write can only
+ * be reached through a registered tool, and registration already refused an SDK
+ * that cannot carry a key. Keeping this a pure projection lets the dispatch
+ * pipeline be exercised against a fake flows API on any installed SDK.
+ */
 export function idempotentFlows(client: DaykeeperClient): IdempotentFlowsApi {
-  assertFlowWriteSdk();
   return client.flows as unknown as IdempotentFlowsApi;
 }
 

@@ -1,8 +1,10 @@
 # Quickstart
 
-`@skyporch/daykeeper-mcp` is a stdio-only Model Context Protocol server over the
-Daykeeper management API. It reads its whole configuration from the environment;
-there are no credential arguments.
+The `daykeeper-mcp` command is a stdio-only Model Context Protocol server over
+the Daykeeper management API. It reads its whole configuration from the
+environment; there are no credential arguments. Service hosts can instead
+mount the package's fetch-native HTTP handler; see the root README for its
+OAuth and isolation requirements.
 
 ## Environment
 

@@ -7,7 +7,13 @@ import {
   REQUIRED_FLOW_WRITE_SDK_VERSION,
   sdkSupportsFlowWrites,
 } from "../src/sdkFlows.ts";
-import { toolCatalog, type ToolMetadata } from "../src/tools.ts";
+import {
+  toolCatalog,
+  toolDefinitions,
+  type ToolMetadata,
+} from "../src/tools.ts";
+import type { DaykeeperClient } from "@skyporch/daykeeper";
+import type { FlowMutationResultShim } from "../src/sdkFlows.ts";
 import { createExecutor } from "../src/transport.ts";
 import {
   api,
@@ -43,6 +49,12 @@ const dispatches = supported
   : {
       skip: `Requires @skyporch/daykeeper ${REQUIRED_FLOW_WRITE_SDK_VERSION} or newer`,
     };
+
+const enabled = {
+  enableMutations: true,
+  enableFlowWrites: true,
+  scopes: WRITE_SCOPES,
+};
 
 function signal(): AbortSignal {
   return new AbortController().signal;
@@ -213,22 +225,51 @@ test("flow writes refuse before dispatch unless the exact scope is declared", as
   assert.equal(calls, 0, "A refused scope must never reach the API");
 });
 
-test("declared read scopes still gate the existing read tools", async (context) => {
+test("a minimal write scope list still allows the inspect path", async (context) => {
   const client = await harness(context, {
-    scopes: ["daykeeper.accounts:read"],
-    fetch: async () => api([]),
+    // The declared list holds only write scopes, as it would for a flow-write
+    // deployment. Enabling the flow-write gate here would depend on the
+    // installed SDK; the read exemption does not.
+    enableMutations: true,
+    scopes: WRITE_SCOPES,
+    fetch: async () => api({ flow: { id: FLOW }, version: { version: 2 } }),
   });
-  assert.equal(
-    envelope(
-      await client.callTool({ name: "daykeeper_tenants_list", arguments: {} }),
-    ).ok,
-    true,
+  // Reads are never gated by the declared list: inspecting an uncertain write
+  // is exactly what the unknown-outcome guidance asks the model to do.
+  for (const inspect of [
+    { name: "daykeeper_flows_get", arguments: { flowId: FLOW } },
+    {
+      name: "daykeeper_flow_versions_get",
+      arguments: { flowId: FLOW, version: 2 },
+    },
+    { name: "daykeeper_flows_list", arguments: {} },
+    { name: "daykeeper_tenants_list", arguments: {} },
+  ]) {
+    const result = envelope(await client.callTool(inspect));
+    assert.equal(result.ok, true, `${inspect.name} must not be scope-refused`);
+  }
+});
+
+test("an undeclared write scope is still refused under the same list", async () => {
+  const config = validateOptions({
+    ...defaults,
+    enableMutations: true,
+    scopes: ["daykeeper.flows:write"],
+  });
+  const result = envelope(
+    await createExecutor(config, async () => api({}))(
+      metadata({
+        name: "daykeeper_tenants_apply",
+        scopes: ["daykeeper.provisioning:apply"],
+        requiresFlowWrites: false,
+      }),
+      {},
+      async () => ({}),
+      signal(),
+    ),
   );
-  const refused = envelope(
-    await client.callTool({ name: "daykeeper_flows_list", arguments: {} }),
-  );
-  assert.equal(refused.ok, false);
-  assert.equal(refused.error?.code, "SCOPE_NOT_GRANTED");
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "SCOPE_NOT_GRANTED");
 });
 
 test("an uncertain flow write asks for inspection and the original key", async () => {
@@ -291,11 +332,285 @@ test("a reused key is a structured error that never suggests a blind new key", a
   ]);
 });
 
-const enabled = {
-  enableMutations: true,
-  enableFlowWrites: true,
-  scopes: WRITE_SCOPES,
+/**
+ * A fake in-process SDK with the idempotent flows shape. It runs the real
+ * dispatch pipeline, projection and envelope on any installed SDK, so the
+ * uncertain-outcome and reused-key paths are covered even while the released
+ * SDK still exposes key-less flow mutations. The packed-candidate cases below
+ * additionally cover the real HTTP request shape.
+ */
+interface FlowCall {
+  method: string;
+  args: readonly unknown[];
+  key: string;
+}
+
+function fakeSdk(
+  behavior: (call: FlowCall) => Promise<FlowMutationResultShim>,
+): { client: DaykeeperClient; calls: FlowCall[] } {
+  const calls: FlowCall[] = [];
+  const record = (call: FlowCall) => {
+    calls.push(call);
+    return behavior(call);
+  };
+  return {
+    calls,
+    client: {
+      flows: {
+        create: (
+          tenantId: string,
+          input: unknown,
+          options: { idempotencyKey: string },
+        ) =>
+          record({
+            method: "create",
+            args: [tenantId, input],
+            key: options.idempotencyKey,
+          }),
+        createVersion: (
+          flowId: string,
+          input: unknown,
+          options: { idempotencyKey: string },
+        ) =>
+          record({
+            method: "createVersion",
+            args: [flowId, input],
+            key: options.idempotencyKey,
+          }),
+        publishVersion: (
+          flowId: string,
+          version: number,
+          input: unknown,
+          options: { idempotencyKey: string },
+        ) =>
+          record({
+            method: "publishVersion",
+            args: [flowId, version, input],
+            key: options.idempotencyKey,
+          }),
+      },
+    } as unknown as DaykeeperClient,
+  };
+}
+
+function result(replayed: boolean): FlowMutationResultShim {
+  return {
+    flow: {
+      id: FLOW,
+      tenantId: TENANT,
+      slug: "refunds",
+      latestVersion: 2,
+      // An unknown server field must never reach the caller.
+      internalNote: "private-api-detail",
+    },
+    version: { flowId: FLOW, version: 2, contentHash: "abc" },
+    replayed,
+  };
+}
+
+async function dispatch(
+  name: string,
+  args: Record<string, unknown>,
+  behavior: (call: FlowCall) => Promise<FlowMutationResultShim>,
+) {
+  const definition = toolDefinitions.find(
+    (tool) => tool.metadata.name === name,
+  );
+  assert(definition, `Missing tool definition: ${name}`);
+  const { client, calls } = fakeSdk(behavior);
+  const config = validateOptions({ ...defaults, ...enabled });
+  const envelopeResult = envelope(
+    await createExecutor(config, async () => api({}))(
+      definition.metadata,
+      args,
+      () => definition.dispatch(client, args),
+      signal(),
+    ),
+  );
+  return { result: envelopeResult, calls };
+}
+
+const CREATE_INPUT = {
+  name: "Refund handoff",
+  slug: "refunds",
+  definition: DEFINITION,
 };
+
+test("each flow write passes the caller's exact key and arguments once", async () => {
+  for (const [name, args, expected] of [
+    [
+      "daykeeper_flows_create",
+      { tenantId: TENANT, input: CREATE_INPUT, idempotencyKey: KEY },
+      { method: "create", args: [TENANT, CREATE_INPUT] },
+    ],
+    [
+      "daykeeper_flow_versions_create",
+      {
+        flowId: FLOW,
+        input: { expectedLatestVersion: 1, definition: DEFINITION },
+        idempotencyKey: KEY,
+      },
+      {
+        method: "createVersion",
+        args: [FLOW, { expectedLatestVersion: 1, definition: DEFINITION }],
+      },
+    ],
+    [
+      "daykeeper_flow_versions_publish",
+      {
+        flowId: FLOW,
+        version: 2,
+        input: { expectedResourceVersion: 3 },
+        idempotencyKey: KEY,
+      },
+      {
+        method: "publishVersion",
+        args: [FLOW, 2, { expectedResourceVersion: 3 }],
+      },
+    ],
+  ] as const) {
+    const { result: envelopeResult, calls } = await dispatch(
+      name,
+      args as unknown as Record<string, unknown>,
+      async () => result(false),
+    );
+    assert.equal(envelopeResult.ok, true);
+    assert.equal(calls.length, 1, "A write must be dispatched exactly once");
+    assert.equal(calls[0]?.method, expected.method);
+    assert.deepEqual(calls[0]?.args, expected.args);
+    // The adapter never mints or rewrites a key.
+    assert.equal(calls[0]?.key, KEY);
+  }
+});
+
+test("an applied write projects identity only", async () => {
+  const { result: applied } = await dispatch(
+    "daykeeper_flows_create",
+    { tenantId: TENANT, input: CREATE_INPUT, idempotencyKey: KEY },
+    async () => result(false),
+  );
+  assert.deepEqual(applied.data, {
+    outcome: "applied",
+    replayed: false,
+    idempotencyKey: KEY,
+    flow: {
+      id: FLOW,
+      tenantId: TENANT,
+      slug: "refunds",
+      latestVersion: 2,
+    },
+    version: { flowId: FLOW, version: 2, contentHash: "abc" },
+  });
+  assert(!JSON.stringify(applied).includes("private-api-detail"));
+});
+
+test("a replayed write is reported as replayed, not applied again", async () => {
+  const { result: replayed, calls } = await dispatch(
+    "daykeeper_flow_versions_create",
+    {
+      flowId: FLOW,
+      input: { expectedLatestVersion: 1, definition: DEFINITION },
+      idempotencyKey: KEY,
+    },
+    async () => result(true),
+  );
+  const data = replayed.data as Record<string, unknown>;
+  assert.equal(data.outcome, "replayed");
+  assert.equal(data.replayed, true);
+  assert.equal(calls.length, 1);
+});
+
+test("an unknown outcome is structured guidance, not an error or a retry", async () => {
+  const { result: unknown, calls } = await dispatch(
+    "daykeeper_flow_versions_publish",
+    {
+      flowId: FLOW,
+      version: 2,
+      input: { expectedResourceVersion: 3 },
+      idempotencyKey: KEY,
+    },
+    async () => {
+      throw Object.assign(new Error("connection lost after dispatch"), {
+        code: "NETWORK_ERROR",
+        outcomeUnknown: true,
+      });
+    },
+  );
+  assert.equal(unknown.ok, true);
+  const data = unknown.data as Record<string, unknown>;
+  assert.equal(data.outcome, "unknown");
+  assert.equal(data.idempotencyKey, KEY);
+  assert.equal(data.inspectWith, "daykeeper_flows_get");
+  assert.match(String(data.guidance), /never with a new key/);
+  assert.deepEqual(data.nextActions, [
+    "inspect_resource_before_retry",
+    "reuse_original_idempotency_key",
+  ]);
+  assert.equal(calls.length, 1, "An unknown outcome must never be retried");
+});
+
+test("a reused key is a structured error asking for inspection first", async () => {
+  const { result: reused, calls } = await dispatch(
+    "daykeeper_flows_create",
+    { tenantId: TENANT, input: CREATE_INPUT, idempotencyKey: KEY },
+    async () => {
+      throw Object.assign(new Error("private-api-detail"), {
+        code: "IDEMPOTENCY_KEY_REUSED",
+        status: 409,
+        outcomeUnknown: false,
+      });
+    },
+  );
+  assert.equal(reused.ok, false);
+  assert.equal(reused.error?.code, "IDEMPOTENCY_KEY_REUSED");
+  assert.equal(reused.error?.retryable, false);
+  assert.match(String(reused.error?.message), /inspect/i);
+  assert.deepEqual(reused.error?.nextActions, [
+    "inspect_resource_before_retry",
+    "use_a_fresh_key_only_for_a_different_request",
+  ]);
+  assert(!JSON.stringify(reused).includes("private-api-detail"));
+  assert.equal(calls.length, 1);
+});
+
+test("a malformed flow write never reaches the SDK", async () => {
+  for (const invalid of [
+    { tenantId: TENANT, input: CREATE_INPUT },
+    { tenantId: TENANT, input: CREATE_INPUT, idempotencyKey: "too-short" },
+    {
+      tenantId: TENANT,
+      input: CREATE_INPUT,
+      idempotencyKey: `${KEY} space`,
+    },
+    {
+      tenantId: TENANT,
+      input: CREATE_INPUT,
+      idempotencyKey: KEY,
+      scopes: ["*"],
+    },
+    {
+      tenantId: TENANT,
+      idempotencyKey: KEY,
+      input: { ...CREATE_INPUT, definition: { ...DEFINITION, actions: [] } },
+    },
+    {
+      tenantId: TENANT,
+      idempotencyKey: KEY,
+      input: {
+        ...CREATE_INPUT,
+        definition: { ...DEFINITION, schemaVersion: "1999-01-01" },
+      },
+    },
+  ]) {
+    const { result: rejected, calls } = await dispatch(
+      "daykeeper_flows_create",
+      invalid,
+      async () => result(false),
+    );
+    assert.equal(rejected.ok, false);
+    assert.equal(calls.length, 0);
+  }
+});
 
 test(
   "candidate SDK: the three flow writes register and carry the key",

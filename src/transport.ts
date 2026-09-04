@@ -232,6 +232,11 @@ function assertScopes(
   metadata: ToolMetadata,
   config: DaykeeperMcpConfig,
 ): void {
+  // Declared scopes gate writes only. Reading is how an operator inspects an
+  // uncertain write, so a minimal write scope list must never refuse
+  // daykeeper_flows_get, the exact tool that guidance names. The API still
+  // enforces read authorization.
+  if (metadata.effect === "read") return;
   if (config.scopes === undefined) {
     if (!metadata.requiresFlowWrites) return;
     throw new McpAdapterError(

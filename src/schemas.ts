@@ -1,10 +1,4 @@
-import {
-  DAYKEEPER_FLOW_SCHEMA_VERSION,
-  type TenantSpec,
-  type EmailChannelSpec,
-  type CreateFlowInput,
-  type CreateFlowVersionInput,
-} from "@skyporch/daykeeper";
+import { type TenantSpec, type EmailChannelSpec } from "@skyporch/daykeeper";
 import { z } from "zod";
 
 const text = (minimum: number, maximum: number) =>
@@ -32,58 +26,6 @@ export const idempotencyKey = z
     "A unique 16–128 character key. Preserve and reuse this same key when inspecting an uncertain apply; do not blindly replay a write.",
   );
 
-const definition = z.strictObject({
-  schemaVersion: z.literal(DAYKEEPER_FLOW_SCHEMA_VERSION),
-  trigger: z.strictObject({
-    event: z.enum(["conversation.created", "message.received"]),
-    channel: z.literal("email"),
-  }),
-  conditions: z
-    .array(
-      z.strictObject({
-        field: z.enum([
-          "contact.email_domain",
-          "conversation.tag",
-          "message.text",
-        ]),
-        operator: z.enum(["equals", "contains", "ends_with"]),
-        value: text(1, 500),
-      }),
-    )
-    .max(20),
-  actions: z
-    .array(
-      z.discriminatedUnion("type", [
-        z.strictObject({
-          id: text(1, 64),
-          type: z.literal("reply"),
-          text: text(1, 4000),
-        }),
-        z.strictObject({
-          id: text(1, 64),
-          type: z.literal("tag"),
-          tag: text(1, 64),
-        }),
-        z.strictObject({
-          id: text(1, 64),
-          type: z.literal("handoff"),
-          target: z.enum(["agent", "human", "hybrid"]),
-        }),
-        z.strictObject({
-          id: text(1, 64),
-          type: z.literal("set_priority"),
-          priority: z.enum(["low", "medium", "high", "urgent"]),
-        }),
-      ]),
-    )
-    .min(1)
-    .max(25)
-    .refine(
-      (actions) =>
-        new Set(actions.map((action) => action.id)).size === actions.length,
-    ),
-});
-
 export const tenantSpec = z.strictObject({
   name,
   slug,
@@ -98,17 +40,6 @@ export const emailChannelSpec = z.strictObject({
     .enum(["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"])
     .optional(),
 }) satisfies z.ZodType<EmailChannelSpec>;
-export const createFlow = z.strictObject({
-  name,
-  slug,
-  description: text(1, 500).optional(),
-  definition,
-}) satisfies z.ZodType<CreateFlowInput>;
-export const createFlowVersion = z.strictObject({
-  expectedLatestVersion: integer,
-  definition,
-}) satisfies z.ZodType<CreateFlowVersionInput>;
-
 export const outputSchema = z
   .strictObject({
     schemaVersion: z.literal("1.0"),

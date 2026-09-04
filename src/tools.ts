@@ -2,8 +2,6 @@ import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import type { DaykeeperClient, DaykeeperScope } from "@skyporch/daykeeper";
 import { z } from "zod";
 import {
-  createFlow,
-  createFlowVersion,
   emailChannelSpec,
   idempotencyKey,
   integer,
@@ -263,45 +261,6 @@ const definitions: readonly ToolDefinition[] = [
     ),
     operation,
     (client, input) => client.operations.retry(input.operationId),
-  ),
-  define(
-    change(
-      "daykeeper_flows_create",
-      "Create a draft management flow. Does not publish or execute it. Inspect resource state before retrying an uncertain result.",
-      "mutation",
-      ["daykeeper.flows:write"],
-    ),
-    z.strictObject({ tenantId: resourceId, input: createFlow }),
-    (client, input) => client.flows.create(input.tenantId, input.input),
-  ),
-  define(
-    change(
-      "daykeeper_flow_versions_create",
-      "Create an immutable revision using the explicit expected latest version. Does not publish or execute it.",
-      "mutation",
-      ["daykeeper.flows:write"],
-    ),
-    z.strictObject({ flowId: resourceId, input: createFlowVersion }),
-    (client, input) => client.flows.createVersion(input.flowId, input.input),
-  ),
-  define(
-    change(
-      "daykeeper_flow_versions_publish",
-      "Publish an existing revision using the explicit expected resource version. Review API execution gates and the revision first; publication is not proof of runtime execution.",
-      "mutation",
-      ["daykeeper.flows:publish"],
-      false,
-      true,
-    ),
-    z.strictObject({
-      flowId: resourceId,
-      version: integer,
-      expectedResourceVersion: integer,
-    }),
-    (client, input) =>
-      client.flows.publishVersion(input.flowId, input.version, {
-        expectedResourceVersion: input.expectedResourceVersion,
-      }),
   ),
 ];
 

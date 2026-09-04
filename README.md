@@ -29,7 +29,7 @@ configuration file.
 | `DAYKEEPER_ACCESS_TOKEN`         | Short-lived OAuth access token. Mutually exclusive with `DAYKEEPER_API_KEY`.            |
 | `DAYKEEPER_TIMEOUT_MS`           | One request budget, 1,000–60,000 ms; default 30,000.                                    |
 | `DAYKEEPER_MCP_ENABLE_PLANNING`  | Exact `true` exposes two plan-creation tools; default `false`.                          |
-| `DAYKEEPER_MCP_ENABLE_MUTATIONS` | Exact `true` exposes six execution/edit tools; default `false`.                         |
+| `DAYKEEPER_MCP_ENABLE_MUTATIONS` | Exact `true` exposes three provisioning tools; default `false`.                         |
 
 The pinned management SDK supports HTTP only on `localhost` or `127.0.0.1` for
 local development. IPv6 HTTP is not supported by that SDK version. Base paths
@@ -51,7 +51,7 @@ and confirmation UX; verify a host's current instructions before installation.
 
 Start with `daykeeper_capabilities` to inspect server-side execution gates.
 The local resource `daykeeper://adapter/capabilities` describes adapter limits,
-versions and all 16 tool gates without calling the API or returning secrets.
+versions and all 13 tool gates without calling the API or returning secrets.
 The default eight tools only read data. See [the tool contract](TOOLS.md).
 
 Planning persists an expiring plan; it is not a dry run or account signup.
@@ -94,6 +94,10 @@ an already-issued API key; it does not implement OAuth, owner signup, API-key cr
 issuance, billing, inbox operations or workflow execution. Those remain
 separate server-side work and security reviews. Never expose this factory as
 an unauthenticated HTTP bridge to a management credential.
+
+Flow definitions remain readable, but flow creation, revision and publication
+are intentionally absent until those API writes accept idempotency keys and
+document inspect-after-timeout behavior.
 
 Checks cover schema/gate behavior, published SDK request parity, redaction,
 authorization denial, adversarial cancellation/transport and actual packed

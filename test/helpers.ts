@@ -18,15 +18,9 @@ export const FOREIGN = "22222222-2222-4222-8222-222222222222";
 export const FLOW = "33333333-3333-4333-8333-333333333333";
 export const OPERATION = "44444444-4444-4444-8444-444444444444";
 export const PLAN = "55555555-5555-4555-8555-555555555555";
-export const KEY = "daykeeper-test-apply-123456";
+export const KEY = "0000000000000000";
 export const BASE_URL = "https://api.example.test/proxy";
 export const defaults = { baseUrl: BASE_URL, accessToken: TOKEN };
-export const flowDefinition = {
-  schemaVersion: "2026-08-01",
-  trigger: { event: "conversation.created", channel: "email" },
-  conditions: [{ field: "message.text", operator: "contains", value: "help" }],
-  actions: [{ id: "handoff", type: "handoff", target: "human" }],
-};
 
 export async function harness(
   context: TestContext,

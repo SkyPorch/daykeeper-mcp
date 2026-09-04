@@ -5,7 +5,6 @@ import {
   BASE_URL,
   envelope,
   FLOW,
-  flowDefinition,
   FOREIGN,
   harness,
   KEY,
@@ -29,6 +28,8 @@ for (const era of ["legacy", "modern"] as const) {
       era,
     );
     const listing = await client.listTools();
+    assert.match(client.getInstructions() ?? "", /show the exact plan/);
+    assert.match(client.getInstructions() ?? "", /Never infer permission/);
     assert.equal(listing.tools.length, 8);
     for (const tool of listing.tools) {
       assert.equal(tool.annotations?.readOnlyHint, true);
@@ -50,7 +51,7 @@ for (const era of ["legacy", "modern"] as const) {
     assert.equal(metadata.credentialIssuance, false);
     assert.equal(metadata.credentialMode, "access_token");
     assert.equal(metadata.automaticRetries, false);
-    assert.equal(metadata.tools.length, 16);
+    assert.equal(metadata.tools.length, 13);
     assert.equal(
       metadata.tools.filter((tool: { enabled: boolean }) => tool.enabled)
         .length,
@@ -58,6 +59,18 @@ for (const era of ["legacy", "modern"] as const) {
     );
     assert(!JSON.stringify(resource).includes(TOKEN));
     assert(!JSON.stringify(resource).includes(BASE_URL));
+    for (const unsafeFlowWrite of [
+      "daykeeper_flows_create",
+      "daykeeper_flow_versions_create",
+      "daykeeper_flow_versions_publish",
+    ]) {
+      assert.equal(
+        metadata.tools.some(
+          (tool: { name: string }) => tool.name === unsafeFlowWrite,
+        ),
+        false,
+      );
+    }
     assert.equal(calls, 0);
     const result = envelope(
       await client.callTool({ name: "daykeeper_capabilities", arguments: {} }),
@@ -70,8 +83,8 @@ for (const era of ["legacy", "modern"] as const) {
 for (const [enablePlanning, enableMutations, count] of [
   [false, false, 8],
   [true, false, 10],
-  [false, true, 14],
-  [true, true, 16],
+  [false, true, 11],
+  [true, true, 13],
 ] as const) {
   test(`independent tool gates: planning=${enablePlanning}, mutations=${enableMutations}`, async (context) => {
     const client = await harness(context, { enablePlanning, enableMutations });
@@ -93,11 +106,15 @@ for (const [enablePlanning, enableMutations, count] of [
       );
       assert.equal(tool.annotations?.idempotentHint, false);
     }
-    assert.equal(
-      tools.find((tool) => tool.name === "daykeeper_flow_versions_publish")
-        ?.annotations?.destructiveHint,
-      enableMutations ? true : undefined,
-    );
+    for (const unsafeFlowWrite of [
+      "daykeeper_flows_create",
+      "daykeeper_flow_versions_create",
+      "daykeeper_flow_versions_publish",
+    ])
+      assert.equal(
+        tools.some((tool) => tool.name === unsafeFlowWrite),
+        false,
+      );
   });
 }
 
@@ -106,11 +123,6 @@ const spec = {
   slug: "example-company",
   locale: "en",
   administrator: { name: "Support operator", email: "support@example.test" },
-};
-const flowInput = {
-  name: "Email routing",
-  slug: "email-routing",
-  definition: flowDefinition,
 };
 const cases = [
   {
@@ -202,30 +214,6 @@ const cases = [
     method: "POST",
     path: `/v1/operations/${OPERATION}/retry`,
   },
-  {
-    tool: "daykeeper_flows_create",
-    input: { tenantId: TENANT, input: flowInput },
-    method: "POST",
-    path: `/v1/tenants/${TENANT}/flows`,
-    body: flowInput,
-  },
-  {
-    tool: "daykeeper_flow_versions_create",
-    input: {
-      flowId: FLOW,
-      input: { expectedLatestVersion: 3, definition: flowDefinition },
-    },
-    method: "POST",
-    path: `/v1/flows/${FLOW}/versions`,
-    body: { expectedLatestVersion: 3, definition: flowDefinition },
-  },
-  {
-    tool: "daykeeper_flow_versions_publish",
-    input: { flowId: FLOW, version: 3, expectedResourceVersion: 4 },
-    method: "POST",
-    path: `/v1/flows/${FLOW}/versions/3/publish`,
-    body: { expectedResourceVersion: 4 },
-  },
 ];
 
 for (const example of cases) {
@@ -294,7 +282,7 @@ test("disabled tools and arbitrary transport/auth parameters cannot dispatch", a
   assert.equal(calls, 0);
 });
 
-test("strict plans, idempotency, revisions and flow definitions fail before dispatch", async (context) => {
+test("strict plans and idempotency fail before dispatch", async (context) => {
   let calls = 0;
   const client = await harness(context, {
     enablePlanning: true,
@@ -323,43 +311,6 @@ test("strict plans, idempotency, revisions and flow definitions fail before disp
         spec: {
           ...spec,
           administrator: { ...spec.administrator, role: "owner" },
-        },
-      },
-    },
-    {
-      name: "daykeeper_flow_versions_publish",
-      arguments: { flowId: FLOW, version: 1 },
-    },
-    {
-      name: "daykeeper_flow_versions_create",
-      arguments: {
-        flowId: FLOW,
-        input: { expectedLatestVersion: 1.5, definition: flowDefinition },
-      },
-    },
-    {
-      name: "daykeeper_flows_create",
-      arguments: {
-        tenantId: TENANT,
-        input: {
-          ...flowInput,
-          definition: {
-            ...flowDefinition,
-            actions: [flowDefinition.actions[0], flowDefinition.actions[0]],
-          },
-        },
-      },
-    },
-    {
-      name: "daykeeper_flows_create",
-      arguments: {
-        tenantId: TENANT,
-        input: {
-          ...flowInput,
-          definition: {
-            ...flowDefinition,
-            trigger: { event: "conversation.created", channel: "web" },
-          },
         },
       },
     },

@@ -43,5 +43,11 @@ is in the upstream contract it consumes through `@skyporch/daykeeper`.
 - Accept exactly one `DAYKEEPER_API_KEY` for static headless use or
   `DAYKEEPER_ACCESS_TOKEN` for OAuth, with no credential arguments or fallback.
 - Verify modern/legacy MCP clients and the actual packed executable without live credentials.
+- Export a transport-neutral Streamable HTTP handler with mandatory OAuth
+  verification, RFC 9728 discovery, strict Host/Origin gates, audience-bound
+  short-lived tokens, verified principal/grant bindings, a pinned downstream
+  API and non-elevating separate credentials. Authentication, request bodies,
+  streaming responses and global/per-principal work are bounded. The package
+  still deploys no listener or authorization server.
 
 No npm release, hosted OAuth endpoint or production activation is included.

@@ -51,7 +51,9 @@ for (const era of ["legacy", "modern"] as const) {
     assert.equal(metadata.credentialIssuance, false);
     assert.equal(metadata.credentialMode, "access_token");
     assert.equal(metadata.automaticRetries, false);
-    assert.equal(metadata.tools.length, 13);
+    assert.equal(metadata.tools.length, 16);
+    assert.equal(metadata.flowWritesEnabled, false);
+    assert.equal(metadata.declaredScopes, null);
     assert.equal(
       metadata.tools.filter((tool: { enabled: boolean }) => tool.enabled)
         .length,
@@ -59,17 +61,19 @@ for (const era of ["legacy", "modern"] as const) {
     );
     assert(!JSON.stringify(resource).includes(TOKEN));
     assert(!JSON.stringify(resource).includes(BASE_URL));
-    for (const unsafeFlowWrite of [
+    // Flow writes are catalogued so hosts can explain the gate, never enabled here.
+    for (const gatedFlowWrite of [
       "daykeeper_flows_create",
       "daykeeper_flow_versions_create",
       "daykeeper_flow_versions_publish",
     ]) {
-      assert.equal(
-        metadata.tools.some(
-          (tool: { name: string }) => tool.name === unsafeFlowWrite,
-        ),
-        false,
+      const entry = metadata.tools.find(
+        (tool: { name: string }) => tool.name === gatedFlowWrite,
       );
+      assert(entry);
+      assert.equal(entry.enabled, false);
+      assert.equal(entry.requiresFlowWrites, true);
+      assert.equal(entry.requiresIdempotencyKey, true);
     }
     assert.equal(calls, 0);
     const result = envelope(
@@ -106,13 +110,14 @@ for (const [enablePlanning, enableMutations, count] of [
       );
       assert.equal(tool.annotations?.idempotentHint, false);
     }
-    for (const unsafeFlowWrite of [
+    // Enabling generic mutations must not expose flow writes.
+    for (const gatedFlowWrite of [
       "daykeeper_flows_create",
       "daykeeper_flow_versions_create",
       "daykeeper_flow_versions_publish",
     ])
       assert.equal(
-        tools.some((tool) => tool.name === unsafeFlowWrite),
+        tools.some((tool) => tool.name === gatedFlowWrite),
         false,
       );
   });

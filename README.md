@@ -51,7 +51,7 @@ and confirmation UX; verify a host's current instructions before installation.
 
 Start with `daykeeper_capabilities` to inspect server-side execution gates.
 The local resource `daykeeper://adapter/capabilities` describes adapter limits,
-versions and all 13 tool gates without calling the API or returning secrets.
+versions and all 16 tool gates without calling the API or returning secrets.
 The default eight tools only read data. See [the tool contract](TOOLS.md).
 
 Planning persists an expiring plan; it is not a dry run or account signup.
@@ -101,9 +101,29 @@ issuance, billing, inbox operations or workflow execution. Those remain
 separate server-side work and security reviews. Never expose this factory as
 an unauthenticated HTTP bridge to a management credential.
 
-Flow definitions remain readable, but flow creation, revision and publication
-are intentionally absent until those API writes accept idempotency keys and
-document inspect-after-timeout behavior.
+Flow creation, revision and publication are available only behind two gates.
+`DAYKEEPER_MCP_ENABLE_MUTATIONS=true` alone does not expose them: they also need
+`DAYKEEPER_MCP_ENABLE_FLOW_WRITES=true`, and `DAYKEEPER_MCP_SCOPES` must declare
+the exact scope each one needs (`daykeeper.flows:write` for create and revise,
+`daykeeper.flows:publish` for publish). The adapter refuses a write locally when
+its scope is not declared. Reads are never refused by that list, so the
+inspection tools stay usable under a minimal write scope list; the API still
+makes the real decision on every call.
+
+Each flow write requires the caller to supply an `idempotencyKey`: one key per
+intended mutation, and the same key again on any retry. The adapter never
+generates a key and never retries by itself. When the outcome is uncertain the
+tool answers with `outcome: "unknown"`, the key and inspection guidance instead
+of an error: read the flow or version with `daykeeper_flows_get` or
+`daykeeper_flow_versions_get`, then repeat the call with that same key if the
+write must still happen. A server `IDEMPOTENCY_KEY_REUSED` rejection means the
+key was already used for a different request; inspect first, and pick a fresh
+key only when the intended request genuinely differs. Publication records
+desired state; it is not proof that a runtime executes the flow.
+
+These tools require a management SDK whose flow mutations carry an idempotency
+key and report an uncertain outcome. With an older SDK installed, enabling the
+flow-write gate fails at startup with a message naming the required version.
 
 Checks cover schema/gate behavior, published SDK request parity, redaction,
 authorization denial, adversarial cancellation/transport and actual packed

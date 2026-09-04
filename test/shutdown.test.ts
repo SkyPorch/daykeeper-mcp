@@ -102,6 +102,8 @@ test("disposed executor rejects future work without dispatching, including after
     description: "Test read",
     idempotent: true,
     destructive: false,
+    requiresIdempotencyKey: false,
+    requiresFlowWrites: false,
   };
   assert.equal(
     envelope(

@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   }
   if (args.length === 1 && args[0] === "--help") {
     process.stdout.write(
-      "Daykeeper MCP (stdio only)\nConfigure DAYKEEPER_API_URL plus exactly one DAYKEEPER_API_KEY or DAYKEEPER_ACCESS_TOKEN in the host environment.\nUse API_KEY for a scoped static headless credential; use ACCESS_TOKEN for OAuth.\nOptional DAYKEEPER_MCP_ENABLE_PLANNING=true and DAYKEEPER_MCP_ENABLE_MUTATIONS=true expose separately gated writes.\nNo HTTP listener, credential arguments, issuance, or automatic retries.\n",
+      "Daykeeper MCP (stdio only)\nConfigure DAYKEEPER_API_URL plus exactly one DAYKEEPER_API_KEY or DAYKEEPER_ACCESS_TOKEN in the host environment.\nUse API_KEY for a scoped static headless credential; use ACCESS_TOKEN for OAuth.\nOptional DAYKEEPER_MCP_ENABLE_PLANNING=true and DAYKEEPER_MCP_ENABLE_MUTATIONS=true expose separately gated writes.\nFlow create/revise/publish additionally require DAYKEEPER_MCP_ENABLE_FLOW_WRITES=true and DAYKEEPER_MCP_SCOPES listing the credential's exact scopes.\nNo HTTP listener, credential arguments, issuance, or automatic retries.\n",
     );
     return;
   }

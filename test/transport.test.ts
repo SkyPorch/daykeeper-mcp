@@ -31,6 +31,8 @@ const read: ToolMetadata = {
   description: "Test read",
   idempotent: true,
   destructive: false,
+  requiresIdempotencyKey: false,
+  requiresFlowWrites: false,
 };
 const write: ToolMetadata = {
   name: "daykeeper_tenants_apply",
@@ -39,12 +41,15 @@ const write: ToolMetadata = {
   description: "Test apply",
   idempotent: true,
   destructive: false,
+  requiresIdempotencyKey: true,
+  requiresFlowWrites: false,
 };
 const plan: ToolMetadata = {
   ...write,
   name: "daykeeper_tenants_plan",
   effect: "plan",
   idempotent: false,
+  requiresIdempotencyKey: false,
 };
 const config = validateOptions({
   ...defaults,

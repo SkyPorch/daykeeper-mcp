@@ -63,6 +63,7 @@ export function createExecutor(
           "TOOL_DISABLED",
           "This write category is not enabled for the local adapter.",
         );
+      assertScopes(metadata, config);
       if (Buffer.byteLength(JSON.stringify(input)) > MAX_INPUT_BYTES)
         throw new McpAdapterError(
           "INPUT_TOO_LARGE",
@@ -188,10 +189,23 @@ export function createExecutor(
                   "inspect_operation_before_retry",
                   "reuse_original_idempotency_key",
                 ]
-              : ["inspect_resource_before_retry"]),
+              : metadata.requiresIdempotencyKey
+                ? [
+                    "inspect_resource_before_retry",
+                    "reuse_original_idempotency_key",
+                  ]
+                : ["inspect_resource_before_retry"]),
           ]),
         ];
       }
+      if (details.code === "IDEMPOTENCY_KEY_REUSED")
+        details.nextActions = [
+          ...new Set([
+            ...details.nextActions,
+            "inspect_resource_before_retry",
+            "use_a_fresh_key_only_for_a_different_request",
+          ]),
+        ];
       return result(metadata, config.accessToken, {
         ok: false,
         error: details,
@@ -207,6 +221,36 @@ export function createExecutor(
         );
     }
   };
+}
+
+/**
+ * A second, local refusal. The API remains the authority on authorization; this
+ * only stops a tool whose exact required scope the operator did not declare for
+ * the configured credential.
+ */
+function assertScopes(
+  metadata: ToolMetadata,
+  config: DaykeeperMcpConfig,
+): void {
+  // Declared scopes gate writes only. Reading is how an operator inspects an
+  // uncertain write, so a minimal write scope list must never refuse
+  // daykeeper_flows_get, the exact tool that guidance names. The API still
+  // enforces read authorization.
+  if (metadata.effect === "read") return;
+  if (config.scopes === undefined) {
+    if (!metadata.requiresFlowWrites) return;
+    throw new McpAdapterError(
+      `SCOPES_NOT_DECLARED`,
+      `Flow writes require the exact scopes the configured ${config.credentialMode} credential holds to be declared in DAYKEEPER_MCP_SCOPES. This tool needs ${metadata.scopes.join(", ")}.`,
+    );
+  }
+  const granted = config.scopes;
+  const missing = metadata.scopes.filter((scope) => !granted.includes(scope));
+  if (missing.length > 0)
+    throw new McpAdapterError(
+      "SCOPE_NOT_GRANTED",
+      `The configured ${config.credentialMode} credential does not declare ${missing.join(", ")}, which this tool requires.`,
+    );
 }
 
 function result(

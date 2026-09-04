@@ -3,8 +3,9 @@
 A local Model Context Protocol adapter for the Daykeeper management API,
 published by SkyPorch as `@skyporch/daykeeper-mcp` after release approval.
 This foundation is private, unpublished and read-only by default. It supports a
-separately issued scoped API key for headless local use, but does not yet provide
-a hosted MCP endpoint or self-serve credential issuance.
+separately issued scoped API key for headless local use and exports a secured,
+fetch-native Streamable HTTP mounting primitive. It does not deploy a hosted
+endpoint, run an authorization server or issue credentials.
 
 ## Local setup
 
@@ -42,15 +43,65 @@ environment or secret manager. `DAYKEEPER_API_KEY` is the Resend-style local
 fallback for a scoped static credential; hosted OAuth remains the preferred
 identity and uses `DAYKEEPER_ACCESS_TOKEN`.
 
-The adapter uses the official MCP SDK 2.0.0 stdio transport for modern
-`2026-07-28` clients and the SDK's legacy 2025 compatibility path. Other transports
-are not exposed by this package's command. MCP hosts differ in configuration
-and confirmation UX; verify a host's current instructions before installation.
+The command uses the official MCP SDK 2.0.0 stdio transport for modern
+`2026-07-28` clients and the SDK's legacy 2025 compatibility path. No HTTP
+listener is exposed by the command. MCP hosts differ in configuration and
+confirmation UX; verify a host's current instructions before installation.
+
+## Hosted mounting primitive
+
+`createDaykeeperMcpHttpHandler` returns a web-standard `fetch`, `close`,
+`notify` and `bus` surface. A service host supplies its OAuth verifier and maps
+each validated MCP identity to a distinct, short-lived, principal-scoped
+Daykeeper access token:
+
+```ts
+import { createDaykeeperMcpHttpHandler } from "@skyporch/daykeeper-mcp";
+
+const handler = createDaykeeperMcpHttpHandler({
+  resourceServerUrl: new URL("https://mcp.daykeeper.example/mcp"),
+  daykeeperApiUrl: new URL("https://api.daykeeper.example"),
+  oauthMetadata,
+  verifier: platformMcpTokenVerifier,
+  allowedHostnames: ["mcp.daykeeper.example"],
+  allowedOrigins: ["https://app.daykeeper.example"],
+  scopesSupported: ["daykeeper.accounts:read"],
+  resolvePrincipal: async (authInfo) => {
+    const grant = await exchangeForDaykeeperGrant(authInfo);
+    if (!grant) return null;
+    return {
+      principalId: grant.principalId,
+      grantId: grant.grantId,
+      downstreamExpiresAt: grant.expiresAt,
+      daykeeper: {
+        baseUrl: "https://api.daykeeper.example",
+        accessToken: grant.accessToken,
+        scopes: grant.scopes,
+      },
+    };
+  },
+});
+```
+
+The downstream token must be different from the incoming MCP bearer. The
+verifier must return finite, short-lived expiry plus opaque
+`daykeeperPrincipalId` and `daykeeperGrantId` bindings in `AuthInfo.extra`.
+The resolver must return those same bindings and an explicitly scoped
+downstream token that expires no later than the MCP bearer. The factory pins
+that token to the configured API URL, prevents scope elevation, and rejects
+concurrently active or recently observed cross-grant credential reuse. It also
+enforces canonical HTTPS discovery, bearer syntax and audience, exact-origin
+browser access, Host validation, bounded
+auth/body/stream work, and reject-fast authentication/global/per-principal
+capacity. The host still owns TLS, trusted proxy configuration, OAuth consent
+and token issuance, tenant membership behind the opaque grant, credential
+exchange, distributed rate limits and durable audit logs. Mount the handler
+only after all of those controls are configured.
 
 ## Working safely
 
 Start with `daykeeper_capabilities` to inspect server-side execution gates.
-The local resource `daykeeper://adapter/capabilities` describes adapter limits,
+The resource `daykeeper://adapter/capabilities` describes adapter limits,
 versions and all 16 tool gates without calling the API or returning secrets.
 The default eight tools only read data. See [the tool contract](TOOLS.md).
 
@@ -95,11 +146,13 @@ The separately protected [release process](RELEASING.md) can only stage an
 already-bootstrapped package for human review; it cannot approve publication.
 
 The Resend-inspired destination is a hosted MCP service with explicit OAuth
-consent/delegation and this scoped headless fallback. This local adapter accepts
-an already-issued API key; it does not implement OAuth, owner signup, API-key creation/revocation, customer-session
-issuance, billing, inbox operations or workflow execution. Those remain
-separate server-side work and security reviews. Never expose this factory as
-an unauthenticated HTTP bridge to a management credential.
+consent/delegation and this scoped headless fallback. This package verifies an
+already-issued bearer through an injected verifier; it does not implement the
+authorization server, owner signup, API-key creation/revocation,
+customer-session issuance, billing, inbox operations or workflow execution.
+Those remain separate server-side work and security reviews. Never mount the
+HTTP handler without authentication or map its incoming MCP bearer directly to
+the management API.
 
 Flow creation, revision and publication are available only behind two gates.
 `DAYKEEPER_MCP_ENABLE_MUTATIONS=true` alone does not expose them: they also need

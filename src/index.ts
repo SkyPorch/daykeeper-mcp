@@ -83,6 +83,7 @@ export function createDaykeeperMcpServer(
             transport: "stdio",
             hostedOAuth: false,
             credentialIssuance: false,
+            credentialMode: config.credentialMode,
             automaticRetries: false,
             maximumConcurrentRequests: MAX_CONCURRENT_REQUESTS,
             maximumInputBytes: MAX_INPUT_BYTES,

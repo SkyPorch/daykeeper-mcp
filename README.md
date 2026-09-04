@@ -2,13 +2,14 @@
 
 A local Model Context Protocol adapter for the Daykeeper management API,
 published by SkyPorch as `@skyporch/daykeeper-mcp` after release approval.
-This foundation is private, unpublished and read-only by default. It does not
-yet provide a hosted MCP endpoint or self-serve credential issuance.
+This foundation is private, unpublished and read-only by default. It supports a
+separately issued scoped API key for headless local use, but does not yet provide
+a hosted MCP endpoint or self-serve credential issuance.
 
 ## Local setup
 
-Requires Node 20 or newer and a separately issued, scoped Daykeeper management
-access token. Build the reviewed checkout:
+Requires Node 20 or newer and a separately issued, scoped Daykeeper credential.
+Build the reviewed checkout:
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -21,19 +22,25 @@ with these variables supplied through the host's protected environment or
 secret manager. Never put a real token in arguments, prompts or a checked-in
 configuration file.
 
-| Variable                         | Behavior                                                                           |
-| -------------------------------- | ---------------------------------------------------------------------------------- |
-| `DAYKEEPER_API_URL`              | Required management API base URL; HTTPS in production.                             |
-| `DAYKEEPER_ACCESS_TOKEN`         | Required scoped management credential; never a customer session or provider token. |
-| `DAYKEEPER_TIMEOUT_MS`           | One request budget, 1,000–60,000 ms; default 30,000.                               |
-| `DAYKEEPER_MCP_ENABLE_PLANNING`  | Exact `true` exposes two plan-creation tools; default `false`.                     |
-| `DAYKEEPER_MCP_ENABLE_MUTATIONS` | Exact `true` exposes six execution/edit tools; default `false`.                    |
+| Variable                         | Behavior                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| `DAYKEEPER_API_URL`              | Required management API base URL; HTTPS in production.                                  |
+| `DAYKEEPER_API_KEY`              | Preferred static headless credential. Mutually exclusive with `DAYKEEPER_ACCESS_TOKEN`. |
+| `DAYKEEPER_ACCESS_TOKEN`         | Short-lived OAuth access token. Mutually exclusive with `DAYKEEPER_API_KEY`.            |
+| `DAYKEEPER_TIMEOUT_MS`           | One request budget, 1,000–60,000 ms; default 30,000.                                    |
+| `DAYKEEPER_MCP_ENABLE_PLANNING`  | Exact `true` exposes two plan-creation tools; default `false`.                          |
+| `DAYKEEPER_MCP_ENABLE_MUTATIONS` | Exact `true` exposes six execution/edit tools; default `false`.                         |
 
 The pinned management SDK supports HTTP only on `localhost` or `127.0.0.1` for
 local development. IPv6 HTTP is not supported by that SDK version. Base paths
 are preserved; URL credentials, query strings and fragments are rejected.
 No HTTP listener is started. Standard output is reserved for MCP JSON-RPC;
 `--help` and `--version` are standalone informational commands, not server mode.
+
+Configure exactly one credential variable. Keep it in the MCP host's protected
+environment or secret manager. `DAYKEEPER_API_KEY` is the Resend-style local
+fallback for a scoped static credential; hosted OAuth remains the preferred
+identity and uses `DAYKEEPER_ACCESS_TOKEN`.
 
 The adapter uses the official MCP SDK 2.0.0 stdio transport for modern
 `2026-07-28` clients and the SDK's legacy 2025 compatibility path. Other transports
@@ -82,8 +89,8 @@ and set `DAYKEEPER_RELEASE_APPROVED=1`. Documentation of a package name is not
 proof it is available from the registry.
 
 The Resend-inspired destination is a hosted MCP service with explicit OAuth
-consent/delegation and a scoped headless path. This local adapter does not
-implement OAuth, owner signup, API-key creation/revocation, customer-session
+consent/delegation and this scoped headless fallback. This local adapter accepts
+an already-issued API key; it does not implement OAuth, owner signup, API-key creation/revocation, customer-session
 issuance, billing, inbox operations or workflow execution. Those remain
 separate server-side work and security reviews. Never expose this factory as
 an unauthenticated HTTP bridge to a management credential.

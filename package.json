@@ -1,0 +1,82 @@
+{
+  "name": "@skyporch/daykeeper-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scoped Model Context Protocol adapter for the Daykeeper management API",
+  "type": "module",
+  "sideEffects": false,
+  "bin": {
+    "daykeeper-mcp": "./dist/cli.js"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "TOOLS.md",
+    "README.md",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/cli.ts --format esm,cjs --dts --sourcemap --target node20 --clean && node scripts/normalize-sourcemaps.mjs",
+    "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm smoke && pnpm pack:check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "pack:check": "node scripts/verify-package.mjs",
+    "check:cold": "node scripts/cold-check.mjs",
+    "prepublishOnly": "node scripts/verify-release.mjs",
+    "prepack": "pnpm run build"
+  },
+  "packageManager": "pnpm@10.8.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SkyPorch/daykeeper-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SkyPorch/daykeeper-mcp/issues"
+  },
+  "homepage": "https://github.com/SkyPorch/daykeeper-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@skyporch/daykeeper": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@types/node": "22.20.1",
+    "prettier": "3.9.6",
+    "tsup": "8.5.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.28.1"
+    }
+  }
+}

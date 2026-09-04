@@ -91,6 +91,8 @@ proof it is available from the registry.
 CI scans the complete candidate history with a checksum-pinned Gitleaks binary.
 The one ignored fingerprint is an exact historical synthetic fixture credential;
 new matches, including other matches in the same test file, still fail the gate.
+The separately protected [release process](RELEASING.md) can only stage an
+already-bootstrapped package for human review; it cannot approve publication.
 
 The Resend-inspired destination is a hosted MCP service with explicit OAuth
 consent/delegation and this scoped headless fallback. This local adapter accepts

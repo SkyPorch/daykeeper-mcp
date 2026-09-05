@@ -947,7 +947,8 @@ function validateVerifiedAuth(
   )
     throw new Error("invalid_auth_info");
   const resource = new URL(candidate.resource.href);
-  resource.hash = "";
+  // Compare the verified identifier as supplied. Removing a fragment would
+  // authorize a different resource (including an explicitly empty fragment).
   if (resource.href !== expectedResource.href)
     throw new Error("invalid_resource");
   const clientId = boundedIdentifier(candidate.clientId);

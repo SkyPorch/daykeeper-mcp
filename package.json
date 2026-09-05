@@ -41,6 +41,7 @@
     "smoke": "node scripts/smoke.mjs",
     "pack:check": "node scripts/verify-package.mjs",
     "check:cold": "node scripts/cold-check.mjs",
+    "check:sdk-candidate": "node scripts/check-sdk-candidate.mjs",
     "prepublishOnly": "node scripts/verify-release.mjs",
     "prepack": "pnpm run build"
   },

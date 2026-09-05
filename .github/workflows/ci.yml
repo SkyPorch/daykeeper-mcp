@@ -54,3 +54,38 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm check
+
+  sdk-candidate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: adapter
+      - uses: actions/checkout@v4
+        with:
+          repository: SkyPorch/daykeeper-node
+          # Reviewed release candidate, not a mutable branch or published upgrade.
+          ref: 92edb7086a40115d515c1801d9219d7c20343b8f
+          path: sdk-candidate
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.8.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build trusted candidate artifact
+        working-directory: sdk-candidate
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm build
+          mkdir "${RUNNER_TEMP}/daykeeper-sdk-artifact"
+          npm pack --ignore-scripts --pack-destination "${RUNNER_TEMP}/daykeeper-sdk-artifact"
+      - name: Check adapter against packed SDK
+        working-directory: adapter
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm check:sdk-candidate "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz"

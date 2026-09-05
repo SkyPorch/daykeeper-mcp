@@ -181,6 +181,16 @@ These tools require a management SDK whose flow mutations carry an idempotency
 key and report an uncertain outcome. With an older SDK installed, enabling the
 flow-write gate fails at startup with a message naming the required version.
 
+Before upgrading the pinned SDK, run `pnpm check:sdk-candidate /absolute/path/sdk.tgz`
+with a trusted locally built `@skyporch/daykeeper` tarball. This creates a separate
+consumer workspace, installs the candidate without install scripts, typechecks
+the adapter, and requires all five real-SDK flow dispatch cases to run without
+skips. It records the artifact SHA-256 and logs; it never changes the release
+manifest or lockfile. Candidate code executes during tests, so do not use an
+untrusted tarball. CI pins the reviewed SDK source commit for this check;
+updating that pin is a separate review step, not an automatic release upgrade.
+This proves injected-transport compatibility, not live flow execution.
+
 Checks cover schema/gate behavior, published SDK request parity, redaction,
 authorization denial, adversarial cancellation/transport and actual packed
 stdio sessions. Loopback fixtures are not production multi-tenant certification.

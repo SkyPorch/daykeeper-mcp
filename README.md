@@ -91,7 +91,10 @@ downstream token that expires no later than the MCP bearer. The factory pins
 that token to the configured API URL, prevents scope elevation, and rejects
 concurrently active or recently observed cross-grant credential reuse. It also
 enforces canonical HTTPS discovery, bearer syntax and audience, exact-origin
-browser access, Host validation, bounded
+browser access and exact verified resource-identifier matching. Fragment-bearing
+identifiers are rejected, not normalized into the configured resource; OAuth
+resource identifiers must not contain fragments ([RFC 8707](https://www.rfc-editor.org/rfc/rfc8707.html#section-2)). It also enforces
+Host validation, bounded
 auth/body/stream work, and reject-fast authentication/global/per-principal
 capacity. The host still owns TLS, trusted proxy configuration, OAuth consent
 and token issuance, tenant membership behind the opaque grant, credential

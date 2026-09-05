@@ -48,6 +48,7 @@ for (const name of [
   "tsconfig.json",
   "src",
   "test",
+  "scripts",
 ])
   await copyChecked(name, join(source, name));
 const originalManifest = await readFile("package.json");
@@ -101,12 +102,16 @@ const installed = JSON.parse(
 );
 assert.equal(installed.name, "@skyporch/daykeeper");
 await execute("typecheck", "pnpm", ["typecheck"]);
-const tap = await execute("flows", process.execPath, [
+const candidateTests = (await readdir("test"))
+  .filter((name) => name.endsWith(".test.ts"))
+  .sort()
+  .map((name) => `test/${name}`);
+const tap = await execute("tests", process.execPath, [
   "--import",
   "tsx",
   "--test",
   "--test-reporter=tap",
-  "test/flowWrites.test.ts",
+  ...candidateTests,
 ]);
 assert.match(tap, /^# fail 0$/m);
 assert.match(
@@ -116,8 +121,8 @@ assert.match(
 );
 assert.equal(
   (tap.match(/^ok \d+ - candidate SDK:/gm) ?? []).length,
-  5,
-  "All five packed-SDK dispatch cases must run",
+  8,
+  "All five flow and three inbox packed-SDK dispatch cases must run",
 );
 assert.deepEqual(await readFile("package.json"), originalManifest);
 assert.deepEqual(await readFile("pnpm-lock.yaml"), originalLock);
@@ -126,7 +131,7 @@ const result = {
   artifactSha256: createHash("sha256").update(bytes).digest("hex"),
   node: process.version,
   releaseManifestAndLockUnchanged: true,
-  candidateDispatchTests: 5,
+  candidateDispatchTests: 8,
   skipped: 0,
   scope:
     "Real packed SDK and in-memory MCP protocol with injected HTTP fixtures; no live API or provider certification",

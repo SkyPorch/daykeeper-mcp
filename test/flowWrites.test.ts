@@ -616,15 +616,23 @@ test(
   "candidate SDK: the three flow writes register and carry the key",
   dispatches,
   async (context) => {
-    const requests: { url: string; method?: string; key: string | null }[] = [];
+    const requests: {
+      url: string;
+      method?: string;
+      key: string | null;
+      body: unknown;
+    }[] = [];
     const client = await harness(context, {
       ...enabled,
       fetch: async (url, init) => {
         const headers = new Headers(init?.headers);
+        assert.equal(headers.get("authorization"), `Bearer ${TOKEN}`);
+        assert.equal(init?.redirect, "error");
         requests.push({
           url: String(url),
           method: init?.method,
           key: headers.get("idempotency-key"),
+          body: JSON.parse(String(init?.body)),
         });
         return api({
           flow: { id: FLOW, tenantId: TENANT, latestVersion: 2, secret: TOKEN },
@@ -660,7 +668,7 @@ test(
       flow: { id: FLOW, tenantId: TENANT, latestVersion: 2 },
       version: { flowId: FLOW, version: 2, contentHash: "abc" },
     });
-    envelope(
+    const versioned = envelope(
       await client.callTool({
         name: "daykeeper_flow_versions_create",
         arguments: {
@@ -670,7 +678,8 @@ test(
         },
       }),
     );
-    envelope(
+    assert.equal(versioned.ok, true);
+    const published = envelope(
       await client.callTool({
         name: "daykeeper_flow_versions_publish",
         arguments: {
@@ -680,6 +689,15 @@ test(
           idempotencyKey: KEY,
         },
       }),
+    );
+    assert.equal(published.ok, true);
+    assert.deepEqual(
+      requests.map(({ body }) => body),
+      [
+        { name: "Refund handoff", slug: "refunds", definition: DEFINITION },
+        { expectedLatestVersion: 1, definition: DEFINITION },
+        { expectedResourceVersion: 3 },
+      ],
     );
     assert.deepEqual(
       requests.map(({ url, method, key }) => [
@@ -740,9 +758,11 @@ test(
   "candidate SDK: an unknown outcome is structured guidance, not an error",
   dispatches,
   async (context) => {
+    let calls = 0;
     const client = await harness(context, {
       ...enabled,
       fetch: async () => {
+        calls++;
         throw new Error("connection lost after dispatch");
       },
     });
@@ -767,6 +787,7 @@ test(
       "inspect_resource_before_retry",
       "reuse_original_idempotency_key",
     ]);
+    assert.equal(calls, 1, "The real SDK must not retry an uncertain write");
   },
 );
 
@@ -774,10 +795,12 @@ test(
   "candidate SDK: a reused key is surfaced with inspect-first guidance",
   dispatches,
   async (context) => {
+    let calls = 0;
     const client = await harness(context, {
       ...enabled,
-      fetch: async () =>
-        Response.json(
+      fetch: async () => {
+        calls++;
+        return Response.json(
           {
             error: {
               code: "IDEMPOTENCY_KEY_REUSED",
@@ -787,7 +810,8 @@ test(
             },
           },
           { status: 409 },
-        ),
+        );
+      },
     });
     const result = envelope(
       await client.callTool({
@@ -808,6 +832,7 @@ test(
       ),
     );
     assert(!JSON.stringify(result).includes("private-api-detail"));
+    assert.equal(calls, 1, "The real SDK must not retry a reused key");
   },
 );
 

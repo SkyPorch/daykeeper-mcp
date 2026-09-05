@@ -257,6 +257,78 @@ test("strict Origin and Bearer syntax fail before verifier or principal resoluti
   await handler.close();
 });
 
+test("verified resource identifiers match exactly without stripping fragments", async () => {
+  for (const resource of [
+    "https://mcp.example.test/mcp#other-grant",
+    "https://mcp.example.test/mcp#",
+    "https://mcp.example.test/mcp%23other-grant",
+    "https://mcp.example.test/mcp?tenant=other",
+    "https://mcp.example.test/mcp?",
+    "https://mcp.example.test/mcp/",
+    "https://mcp.example.test/other",
+    "https://other.example.test/mcp",
+    "https://mcp.example.test:8443/mcp",
+    "https://user@mcp.example.test/mcp",
+    RESOURCE.href,
+  ]) {
+    let resolved = 0;
+    const handler = createDaykeeperMcpHttpHandler(
+      options({
+        verifier: {
+          verifyAccessToken: async (token) =>
+            authInfo(token, new URL(resource)),
+        },
+        resolvePrincipal: async () => {
+          resolved++;
+          return principal();
+        },
+      }),
+    );
+    try {
+      const response = await handler.fetch(
+        request(
+          "/mcp",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          },
+          true,
+        ),
+      );
+      if (resource === RESOURCE.href) {
+        assert.notEqual(
+          response.status,
+          401,
+          "Exact audience remains accepted",
+        );
+        assert.equal(resolved, 1);
+      } else {
+        assert.equal(
+          response.status,
+          401,
+          `Nonmatching resource must be rejected: ${resource}`,
+        );
+        assert.equal(
+          resolved,
+          0,
+          "Rejected audiences cannot resolve downstream credentials",
+        );
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        assert.match(
+          response.headers.get("www-authenticate") ?? "",
+          /invalid_token/,
+        );
+        const body = await response.text();
+        assert.equal(body.includes(resource), false);
+        assert.equal(body.includes(MCP_TOKEN), false);
+      }
+    } finally {
+      await handler.close();
+    }
+  }
+});
+
 test("the MCP token is audience-bound and cannot be passed through downstream", async () => {
   let resolved = 0;
   const wrongAudience = createDaykeeperMcpHttpHandler(

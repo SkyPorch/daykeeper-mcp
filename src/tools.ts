@@ -14,6 +14,7 @@ import {
 } from "./schemas.ts";
 import type { DaykeeperMcpConfig } from "./config.ts";
 import { McpAdapterError } from "./errors.ts";
+import { assertInboxSdk, inboxSdk } from "./sdkInbox.ts";
 import {
   assertFlowWriteSdk,
   idempotentFlows,
@@ -34,6 +35,7 @@ export interface ToolMetadata {
   requiresIdempotencyKey: boolean;
   /** Additionally gated behind DAYKEEPER_MCP_ENABLE_FLOW_WRITES. */
   requiresFlowWrites: boolean;
+  requiresInboxTools?: boolean;
 }
 export type Execute = (
   metadata: ToolMetadata,
@@ -172,6 +174,55 @@ const apply = z.strictObject({
 });
 
 const definitions: readonly ToolDefinition[] = [
+  define(
+    {
+      ...read(
+        "daykeeper_website_channels_get",
+        "Inspect a website inbox's preparation state. Prepared does not mean traffic is activated or a customer exchange succeeded.",
+        ["daykeeper.accounts:read"],
+      ),
+      requiresInboxTools: true,
+    },
+    tenant,
+    (client, input) => inboxSdk(client).websiteChannels.get(input.tenantId),
+  ),
+  define(
+    {
+      ...read(
+        "daykeeper_tenant_provisioning_get",
+        "Find the current provisioning operation for an authorized tenant after reconnecting. Does not poll, retry, activate traffic or create resources.",
+        ["daykeeper.provisioning:read"],
+      ),
+      requiresInboxTools: true,
+    },
+    tenant,
+    (client, input) =>
+      inboxSdk(client).tenants.getProvisioningOperation(input.tenantId),
+  ),
+  define(
+    {
+      ...change(
+        "daykeeper_website_inboxes_plan",
+        "Persist an expiring tenant plan including a website inbox. Does not create an account, verify DNS or activate traffic. Inspect capabilities and review effects before applying the exact plan/version using daykeeper_tenants_apply.",
+        "plan",
+        ["daykeeper.accounts:write"],
+      ),
+      requiresInboxTools: true,
+    },
+    z.strictObject({
+      spec: tenantSpec.extend({
+        website: z.strictObject({
+          websiteUrl: z.string().max(2048),
+          allowedOrigins: z
+            .array(z.string().max(2048))
+            .min(1)
+            .max(10)
+            .optional(),
+        }),
+      }),
+    }),
+    (client, input) => inboxSdk(client).tenants.plan(input.spec),
+  ),
   define(
     read(
       "daykeeper_capabilities",
@@ -456,6 +507,7 @@ export function toolEnabled(
   metadata: ToolMetadata,
   config: DaykeeperMcpConfig,
 ): boolean {
+  if (metadata.requiresInboxTools && !config.enableInboxTools) return false;
   if (metadata.effect === "read") return true;
   if (metadata.effect === "plan") return config.enablePlanning;
   // Enabling generic mutations must never silently enable flow writes.
@@ -485,6 +537,7 @@ export function registerTools(
     if (!toolEnabled(definition.metadata, config)) continue;
     // Never wire a flow write to an SDK whose mutations cannot carry a key.
     if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
+    if (definition.metadata.requiresInboxTools) assertInboxSdk();
     definition.register(server, execute);
   }
 }

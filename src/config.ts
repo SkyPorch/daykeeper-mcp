@@ -14,6 +14,8 @@ interface DaykeeperMcpBaseOptions {
   enableMutations?: boolean;
   /** Second, independent gate for flow create/revise/publish writes. */
   enableFlowWrites?: boolean;
+  /** SDK-gated website planning and inbox/provisioning inspection. */
+  enableInboxTools?: boolean;
   /**
    * The exact scopes the configured credential is known to hold. Omitted means
    * the operator did not declare them; flow writes then refuse rather than
@@ -50,6 +52,7 @@ export interface DaykeeperMcpConfig {
   readonly enablePlanning: boolean;
   readonly enableMutations: boolean;
   readonly enableFlowWrites: boolean;
+  readonly enableInboxTools: boolean;
   /** Undefined when the operator declared no scope list. */
   readonly scopes: readonly string[] | undefined;
 }
@@ -94,6 +97,7 @@ export function validateOptions(
       options.enablePlanning,
       options.enableMutations,
       options.enableFlowWrites,
+      options.enableInboxTools,
     ]) {
       if (flag !== undefined && typeof flag !== "boolean")
         throw invalidConfig();
@@ -107,6 +111,7 @@ export function validateOptions(
       enablePlanning: options.enablePlanning ?? false,
       enableMutations: options.enableMutations ?? false,
       enableFlowWrites: options.enableFlowWrites ?? false,
+      enableInboxTools: options.enableInboxTools ?? false,
       scopes,
     });
   } catch {
@@ -142,6 +147,7 @@ export function readEnvironment(
     enablePlanning: flag("DAYKEEPER_MCP_ENABLE_PLANNING"),
     enableMutations: flag("DAYKEEPER_MCP_ENABLE_MUTATIONS"),
     enableFlowWrites: flag("DAYKEEPER_MCP_ENABLE_FLOW_WRITES"),
+    enableInboxTools: flag("DAYKEEPER_MCP_ENABLE_INBOX_TOOLS"),
     ...(scopes === undefined ? {} : { scopes }),
   };
   const config = validateOptions(options);
@@ -154,6 +160,7 @@ export function readEnvironment(
     enablePlanning: config.enablePlanning,
     enableMutations: config.enableMutations,
     enableFlowWrites: config.enableFlowWrites,
+    enableInboxTools: config.enableInboxTools,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
 }

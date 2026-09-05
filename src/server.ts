@@ -16,6 +16,11 @@ import {
 } from "./sdkFlows.ts";
 import { registerTools, toolCatalog } from "./tools.ts";
 import { createExecutor } from "./transport.ts";
+import {
+  assertInboxSdk,
+  sdkSupportsInboxTools,
+  REQUIRED_INBOX_SDK_VERSION,
+} from "./sdkInbox.ts";
 
 export interface DaykeeperMcpRuntime {
   readonly transport: "stdio" | "streamable_http";
@@ -69,6 +74,7 @@ export function createDaykeeperMcpServerForRuntime(
   // Refuse to start rather than expose flow writes over an SDK whose mutations
   // cannot carry an idempotency key or report an uncertain outcome.
   if (config.enableFlowWrites) assertFlowWriteSdk();
+  if (config.enableInboxTools) assertInboxSdk();
   const server = new ScopedMcpServer(
     { name: "daykeeper", version: MCP_VERSION },
     {
@@ -114,6 +120,9 @@ export function createDaykeeperMcpServerForRuntime(
             flowWritesEnabled: config.enableFlowWrites,
             flowWriteSdkSupported: sdkSupportsFlowWrites(),
             requiredFlowWriteSdkVersion: REQUIRED_FLOW_WRITE_SDK_VERSION,
+            inboxToolsEnabled: config.enableInboxTools,
+            inboxSdkSupported: sdkSupportsInboxTools(),
+            requiredInboxSdkVersion: REQUIRED_INBOX_SDK_VERSION,
             declaredScopes: config.scopes ?? null,
             tools: toolCatalog(config),
           }),

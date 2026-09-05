@@ -23,14 +23,15 @@ with these variables supplied through the host's protected environment or
 secret manager. Never put a real token in arguments, prompts or a checked-in
 configuration file.
 
-| Variable                         | Behavior                                                                                |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| `DAYKEEPER_API_URL`              | Required management API base URL; HTTPS in production.                                  |
-| `DAYKEEPER_API_KEY`              | Preferred static headless credential. Mutually exclusive with `DAYKEEPER_ACCESS_TOKEN`. |
-| `DAYKEEPER_ACCESS_TOKEN`         | Short-lived OAuth access token. Mutually exclusive with `DAYKEEPER_API_KEY`.            |
-| `DAYKEEPER_TIMEOUT_MS`           | One request budget, 1,000–60,000 ms; default 30,000.                                    |
-| `DAYKEEPER_MCP_ENABLE_PLANNING`  | Exact `true` exposes two plan-creation tools; default `false`.                          |
-| `DAYKEEPER_MCP_ENABLE_MUTATIONS` | Exact `true` exposes three provisioning tools; default `false`.                         |
+| Variable                           | Behavior                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `DAYKEEPER_API_URL`                | Required management API base URL; HTTPS in production.                                                                   |
+| `DAYKEEPER_API_KEY`                | Preferred static headless credential. Mutually exclusive with `DAYKEEPER_ACCESS_TOKEN`.                                  |
+| `DAYKEEPER_ACCESS_TOKEN`           | Short-lived OAuth access token. Mutually exclusive with `DAYKEEPER_API_KEY`.                                             |
+| `DAYKEEPER_TIMEOUT_MS`             | One request budget, 1,000–60,000 ms; default 30,000.                                                                     |
+| `DAYKEEPER_MCP_ENABLE_PLANNING`    | Exact `true` exposes two plan-creation tools; default `false`.                                                           |
+| `DAYKEEPER_MCP_ENABLE_MUTATIONS`   | Exact `true` exposes three provisioning tools; default `false`.                                                          |
+| `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS` | Exact `true` enables SDK-gated inbox/provisioning reads; website planning also needs the planning flag. Default `false`. |
 
 The pinned management SDK supports HTTP only on `localhost` or `127.0.0.1` for
 local development. IPv6 HTTP is not supported by that SDK version. Base paths
@@ -105,7 +106,7 @@ only after all of those controls are configured.
 
 Start with `daykeeper_capabilities` to inspect server-side execution gates.
 The resource `daykeeper://adapter/capabilities` describes adapter limits,
-versions and all 16 tool gates without calling the API or returning secrets.
+versions and all 19 tool gates without calling the API or returning secrets.
 The default eight tools only read data. See [the tool contract](TOOLS.md).
 
 Planning persists an expiring plan; it is not a dry run or account signup.
@@ -114,7 +115,8 @@ an explicit idempotency key for apply. No tool invents a plan, confirmation,
 organization, role, scope or billing approval on behalf of the caller.
 
 Local flags and MCP annotations are safety hints, not authorization. Every tool
-uses the published `@skyporch/daykeeper@0.1.0` client against the configured API,
+uses the pinned `@skyporch/daykeeper@0.1.0` client against the configured API
+(new inbox/flow surfaces require a separately reviewed SDK candidate upgrade),
 which must enforce current principal status, scopes, tenant ownership and
 quotas. Do not share one adapter process/credential between untrusted principals.
 Returned customer names, descriptions and flow text are untrusted data, not
@@ -152,7 +154,7 @@ The Resend-inspired destination is a hosted MCP service with explicit OAuth
 consent/delegation and this scoped headless fallback. This package verifies an
 already-issued bearer through an injected verifier; it does not implement the
 authorization server, owner signup, API-key creation/revocation,
-customer-session issuance, billing, inbox operations or workflow execution.
+customer-session issuance, billing, traffic activation or workflow execution.
 Those remain separate server-side work and security reviews. Never mount the
 HTTP handler without authentication or map its incoming MCP bearer directly to
 the management API.
@@ -184,12 +186,36 @@ flow-write gate fails at startup with a message naming the required version.
 Before upgrading the pinned SDK, run `pnpm check:sdk-candidate /absolute/path/sdk.tgz`
 with a trusted locally built `@skyporch/daykeeper` tarball. This creates a separate
 consumer workspace, installs the candidate without install scripts, typechecks
-the adapter, and requires all five real-SDK flow dispatch cases to run without
-skips. It records the artifact SHA-256 and logs; it never changes the release
+the adapter, and runs the full MCP test suite with zero skips, explicitly requiring
+all five flow and three inbox real-SDK dispatch cases. It records the artifact
+SHA-256 and logs; it never changes the release
 manifest or lockfile. Candidate code executes during tests, so do not use an
 untrusted tarball. CI pins the reviewed SDK source commit for this check;
 updating that pin is a separate review step, not an automatic release upgrade.
 This proves injected-transport compatibility, not live flow execution.
+
+## Programmatic inbox onboarding
+
+The unpublished `@skyporch/daykeeper@0.2.0` candidate adds the website inbox and
+tenant provisioning methods. CI pins source `b601a404ff23d1d55a686305c2b9c9754833ae34`
+and packs it separately; the release dependency/lockfile remain at 0.1.0.
+With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
+than exposing broken tools. Local capability discovery performs no API calls.
+
+After independent signup through the onboarding SDK, supply the scoped credential
+through the MCP host's protected environment. The MCP adapter does not generate
+or return owner private keys or issue signup credentials into transcripts.
+
+With the reviewed newer SDK and inbox/planning flags enabled, use
+`daykeeper_website_inboxes_plan` with an explicit tenant spec and `website`
+settings. Inspect its effects, then use existing `daykeeper_tenants_apply` with
+the exact plan/version and one caller-supplied idempotency key; that step still
+needs the independent mutation gate and server authorization.
+`daykeeper_tenant_provisioning_get` recovers the current operation by tenant ID,
+and `daykeeper_website_channels_get` inspects preparation and `trafficEnabled`.
+Neither read polls, retries, creates resources or activates traffic. A prepared
+inbox is not evidence of a successful customer exchange. These tools do not
+decide whether initial API-only traffic requires website/DNS setup.
 
 Checks cover schema/gate behavior, published SDK request parity, redaction,
 authorization denial, adversarial cancellation/transport and actual packed

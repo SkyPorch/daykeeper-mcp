@@ -67,6 +67,7 @@ async function prepare(sdkTarball, outputDirectory) {
   const work = mkdtempSync(join(tmpdir(), "daykeeper-mcp-connected-"));
   const releaseManifest = await readFile("package.json");
   const releaseLock = await readFile("pnpm-lock.yaml");
+  let stage = "copy-source";
   try {
     const sdkLocal = join(work, "sdk.tgz");
     await cp(sdk, sdkLocal);
@@ -77,6 +78,7 @@ async function prepare(sdkTarball, outputDirectory) {
     await writeFile(join(source, "empty-user.npmrc"), "", { mode: 0o600 });
     await writeFile(join(source, "empty-global.npmrc"), "", { mode: 0o600 });
     const env = toolEnvironment(work, join(work, "store"));
+    stage = "install-source";
     await run(
       "pnpm",
       [
@@ -91,6 +93,7 @@ async function prepare(sdkTarball, outputDirectory) {
         maxBuffer: 8 * 1024 * 1024,
       },
     );
+    stage = "install-sdk";
     await run(
       "pnpm",
       [
@@ -114,6 +117,7 @@ async function prepare(sdkTarball, outputDirectory) {
       ),
     );
     assert.equal(installed.version, REQUIRED_SDK);
+    stage = "build-mcp";
     await run("pnpm", ["build"], {
       cwd: source,
       env,
@@ -130,6 +134,7 @@ async function prepare(sdkTarball, outputDirectory) {
     );
     const packedDirectory = join(work, "packed");
     await mkdir(packedDirectory);
+    stage = "pack-mcp";
     const packResult = JSON.parse(
       (
         await run(
@@ -163,6 +168,7 @@ async function prepare(sdkTarball, outputDirectory) {
       `${JSON.stringify({ ...packedManifest, name: "daykeeper-mcp-connected-consumer", private: true, pnpm: { overrides: { ...packedManifest.pnpm?.overrides, "@skyporch/daykeeper": `file:${sdkLocal}` } } }, null, 2)}\n`,
     );
     await cp(join(source, "pnpm-lock.yaml"), join(consumer, "pnpm-lock.yaml"));
+    stage = "install-consumer";
     await run(
       "pnpm",
       [
@@ -202,6 +208,7 @@ async function prepare(sdkTarball, outputDirectory) {
       { mode: 0o600 },
     );
     const esbuild = join(source, "node_modules/.bin/esbuild");
+    stage = "bundle-cli";
     await run(
       esbuild,
       [
@@ -215,6 +222,7 @@ async function prepare(sdkTarball, outputDirectory) {
       ],
       { cwd: work, env, maxBuffer: 8 * 1024 * 1024 },
     );
+    stage = "bundle-client";
     await run(
       esbuild,
       [
@@ -230,6 +238,7 @@ async function prepare(sdkTarball, outputDirectory) {
       ],
       { cwd: work, env, maxBuffer: 8 * 1024 * 1024 },
     );
+    stage = "load-client";
     const { Client, StdioClientTransport } = await import(
       pathToFileURL(join(output, "client.mjs")).href
     );
@@ -237,6 +246,7 @@ async function prepare(sdkTarball, outputDirectory) {
       createHash("sha256")
         .update(await readFile(path))
         .digest("hex");
+    stage = "notices";
     const notices = createNotices({
       metafiles: [join(work, "cli-meta.json"), join(work, "client-meta.json")],
       baseCwd: work,
@@ -247,6 +257,7 @@ async function prepare(sdkTarball, outputDirectory) {
     await writeFile(join(output, "THIRD_PARTY_NOTICES.txt"), notices.output, {
       mode: 0o600,
     });
+    stage = "manifest";
     await writeFile(
       join(output, "manifest.json"),
       `${JSON.stringify(
@@ -280,6 +291,7 @@ async function prepare(sdkTarball, outputDirectory) {
       { mode: 0o600 },
     );
 
+    stage = "stdio";
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [join(output, "cli.mjs")],
@@ -318,6 +330,20 @@ async function prepare(sdkTarball, outputDirectory) {
       sdkVersion: installed.version,
       entrypoint: join(output, "cli.mjs"),
     };
+  } catch (error) {
+    const code =
+      typeof error?.code === "number"
+        ? String(error.code)
+        : typeof error?.code === "string" &&
+            /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code)
+          ? error.code
+          : "ERROR";
+    // Report only a fixed stage and bounded error code, never child output,
+    // caller paths, configuration values, or package-manager diagnostics.
+    throw new Error(
+      `MCP connected artifact preparation failed at ${stage} (${code})`,
+      { cause: error },
+    );
   } finally {
     try {
       assert.deepEqual(await readFile("package.json"), releaseManifest);
@@ -343,8 +369,14 @@ if (
   } else {
     prepare(sdkTarball, outputDirectory)
       .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`))
-      .catch(() => {
-        process.stderr.write("MCP connected artifact preparation failed\n");
+      .catch((error) => {
+        const message =
+          /^MCP connected artifact preparation failed at [a-z-]+ \([A-Z0-9_]+\)$/.test(
+            error?.message ?? "",
+          )
+            ? error.message
+            : "MCP connected artifact preparation failed";
+        process.stderr.write(`${message}\n`);
         process.exitCode = 1;
       });
   }

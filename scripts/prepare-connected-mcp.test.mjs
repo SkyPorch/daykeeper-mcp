@@ -10,7 +10,30 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { prepare } from "./prepare-connected-mcp.mjs";
+import { prepare, assertPackageVersions } from "./prepare-connected-mcp.mjs";
+
+test("cold optional binaries must match the frozen snapshot exactly", () => {
+  const source = {
+    versions: ["zod@4.4.3"],
+    optionalVersions: ["@esbuild/linux-x64@0.28.1"],
+  };
+  assertPackageVersions(source, {
+    versions: ["zod@4.4.3", "@esbuild/linux-x64@0.28.1"],
+  });
+  assertPackageVersions(source, { versions: ["zod@4.4.3"] });
+  assert.throws(() =>
+    assertPackageVersions(source, {
+      versions: ["zod@4.4.3", "@esbuild/linux-x64@0.29.0"],
+    }),
+  );
+  assert.throws(() =>
+    assertPackageVersions(source, { versions: ["zod@4.4.3", "unknown@1.0.0"] }),
+  );
+  assert.throws(() => assertPackageVersions(source, { versions: [] }));
+  assert.throws(() =>
+    assertPackageVersions(source, { versions: ["zod@4.4.4"] }),
+  );
+});
 
 test("preflight refuses existing output without modifying it or release files", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "daykeeper-mcp-preflight-"));

@@ -258,8 +258,9 @@ node scripts/prepare-connected-mcp.mjs \
 Only use a trusted, reviewed SDK tarball. The helper builds and packs MCP with
 that SDK in a temporary workspace, installs the resulting tarball in a separate
 consumer, and bundles the installed executable and protocol client. It leaves
-the consumer's installed package versions identical to the frozen source set
-(apart from adding MCP itself). Cold builds may fetch registry metadata for the
+the consumer's dependencies pinned to the frozen source versions (apart from
+adding MCP itself). Optional platform binaries may materialize differently on
+cold runners, but must match the exact versions in that snapshot. Cold builds may fetch registry metadata for the
 local SDK override; the connected runtime itself requires no registry access.
 It leaves
 the release manifest and lockfile unchanged, removes its temporary workspace,

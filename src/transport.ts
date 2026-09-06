@@ -184,17 +184,19 @@ export function createExecutor(
         details.nextActions = [
           ...new Set([
             ...details.nextActions,
-            ...(metadata.name.endsWith("_apply")
-              ? [
-                  "inspect_operation_before_retry",
-                  "reuse_original_idempotency_key",
-                ]
-              : metadata.requiresIdempotencyKey
+            ...(metadata.requiresActivationTools
+              ? ["inspect_activation_with_original_intent"]
+              : metadata.name.endsWith("_apply")
                 ? [
-                    "inspect_resource_before_retry",
+                    "inspect_operation_before_retry",
                     "reuse_original_idempotency_key",
                   ]
-                : ["inspect_resource_before_retry"]),
+                : metadata.requiresIdempotencyKey
+                  ? [
+                      "inspect_resource_before_retry",
+                      "reuse_original_idempotency_key",
+                    ]
+                  : ["inspect_resource_before_retry"]),
           ]),
         ];
       }
@@ -238,10 +240,11 @@ function assertScopes(
   // enforces read authorization.
   if (metadata.effect === "read") return;
   if (config.scopes === undefined) {
-    if (!metadata.requiresFlowWrites) return;
+    if (!metadata.requiresFlowWrites && !metadata.requiresActivationTools)
+      return;
     throw new McpAdapterError(
       `SCOPES_NOT_DECLARED`,
-      `Flow writes require the exact scopes the configured ${config.credentialMode} credential holds to be declared in DAYKEEPER_MCP_SCOPES. This tool needs ${metadata.scopes.join(", ")}.`,
+      `${metadata.requiresActivationTools ? "Inbox activation mutations" : "Flow writes"} require the exact scopes the configured ${config.credentialMode} credential holds to be declared in DAYKEEPER_MCP_SCOPES. This tool needs ${metadata.scopes.join(", ")}.`,
     );
   }
   const granted = config.scopes;

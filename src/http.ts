@@ -844,6 +844,7 @@ function validatePrincipal(
       enableMutations: downstream.enableMutations,
       enableFlowWrites: downstream.enableFlowWrites,
       enableInboxTools: downstream.enableInboxTools,
+      enableActivationTools: downstream.enableActivationTools,
       scopes: Object.freeze([...downstream.scopes]),
       ...(principal.daykeeper.fetch
         ? { fetch: principal.daykeeper.fetch }

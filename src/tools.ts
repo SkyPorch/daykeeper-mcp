@@ -15,6 +15,7 @@ import {
 import type { DaykeeperMcpConfig } from "./config.ts";
 import { McpAdapterError } from "./errors.ts";
 import { assertInboxSdk, inboxSdk } from "./sdkInbox.ts";
+import { activationSdk, assertActivationSdk } from "./sdkActivation.ts";
 import {
   assertFlowWriteSdk,
   idempotentFlows,
@@ -36,6 +37,7 @@ export interface ToolMetadata {
   /** Additionally gated behind DAYKEEPER_MCP_ENABLE_FLOW_WRITES. */
   requiresFlowWrites: boolean;
   requiresInboxTools?: boolean;
+  requiresActivationTools?: boolean;
 }
 export type Execute = (
   metadata: ToolMetadata,
@@ -50,7 +52,11 @@ export interface ToolDefinition {
    * pipeline can be exercised directly against a client stub, independently of
    * the MCP protocol layer and of the installed SDK.
    */
-  dispatch(client: DaykeeperClient, input: unknown): Promise<unknown>;
+  dispatch(
+    client: DaykeeperClient,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
   register(server: McpServer, execute: Execute): void;
 }
 
@@ -60,12 +66,13 @@ function define<Schema extends z.ZodType>(
   dispatch: (
     client: DaykeeperClient,
     input: z.output<Schema>,
+    signal?: AbortSignal,
   ) => Promise<unknown>,
 ): ToolDefinition {
   return {
     metadata: Object.freeze(metadata),
-    dispatch(client, input) {
-      return dispatch(client, inputSchema.parse(input));
+    dispatch(client, input, signal) {
+      return dispatch(client, inputSchema.parse(input), signal);
     },
     register(server, execute) {
       server.registerTool<typeof outputSchema, SafeInputSchema>(
@@ -85,7 +92,7 @@ function define<Schema extends z.ZodType>(
           execute(
             metadata,
             input,
-            (client) => this.dispatch(client, input),
+            (client) => this.dispatch(client, input, context.mcpReq.signal),
             context.mcpReq.signal,
           ),
       );
@@ -172,8 +179,92 @@ const apply = z.strictObject({
   planVersion: integer,
   idempotencyKey,
 });
+const activation = z.strictObject({
+  tenantId: resourceId,
+  intent: idempotencyKey,
+});
+const activationCreate = z.strictObject({
+  tenantId: resourceId,
+  idempotencyKey,
+});
+
+const activationTool = (metadata: ToolMetadata): ToolMetadata => ({
+  ...metadata,
+  requiresActivationTools: true,
+});
 
 const definitions: readonly ToolDefinition[] = [
+  define(
+    activationTool(
+      read(
+        "daykeeper_inbox_activations_get",
+        "Inspect the activation receipt for one tenant and intent. Does not activate, revoke, poll or retry.",
+        ["daykeeper.accounts:read"],
+      ),
+    ),
+    activation,
+    (client, input, signal) =>
+      projectActivation(
+        activationSdk(client).inboxActivations.get(
+          input.tenantId,
+          input.intent,
+          {
+            signal,
+          },
+        ),
+        input.tenantId,
+        input.intent,
+      ),
+  ),
+  define(
+    activationTool({
+      ...change(
+        "daykeeper_inbox_activations_create",
+        "Create one inbox activation intent for an authorized tenant. Requires an explicit idempotency key; after an uncertain result, call daykeeper_inbox_activations_get with the same intent before any retry.",
+        "mutation",
+        ["daykeeper.accounts:write"],
+        true,
+        false,
+      ),
+    }),
+    activationCreate,
+    (client, input, signal) =>
+      projectActivation(
+        activationSdk(client).inboxActivations.create(input.tenantId, {
+          idempotencyKey: input.idempotencyKey,
+          signal,
+        }),
+        input.tenantId,
+        input.idempotencyKey,
+      ),
+  ),
+  define(
+    activationTool({
+      ...change(
+        "daykeeper_inbox_activations_revoke",
+        "Revoke one inbox activation intent for an authorized tenant. This is an explicit mutation; after an uncertain result, call daykeeper_inbox_activations_get with the same intent before any retry.",
+        "mutation",
+        ["daykeeper.accounts:write"],
+        true,
+        true,
+      ),
+      // Revocation targets the retained intent; it does not accept a new key.
+      requiresIdempotencyKey: false,
+    }),
+    activation,
+    (client, input, signal) =>
+      projectActivation(
+        activationSdk(client).inboxActivations.revoke(
+          input.tenantId,
+          input.intent,
+          {
+            signal,
+          },
+        ),
+        input.tenantId,
+        input.intent,
+      ),
+  ),
   define(
     {
       ...read(
@@ -507,6 +598,71 @@ function projectFlowMutation(
   };
 }
 
+async function projectActivation(
+  pending: Promise<unknown>,
+  tenantId: string,
+  intent: string,
+): Promise<Record<string, unknown>> {
+  const value = await pending;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected inbox activation receipt.",
+    );
+  const record = value as Record<string, unknown>;
+  const fields = [
+    "activationId",
+    "tenantId",
+    "channelId",
+    "intent",
+    "state",
+    "createdAt",
+    "revokedAt",
+    "replayed",
+  ] as const;
+  if (
+    Object.keys(record).length !== fields.length ||
+    fields.some((field) => !(field in record)) ||
+    record.tenantId !== tenantId.toLowerCase() ||
+    record.intent !== intent
+  )
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected inbox activation receipt.",
+    );
+  try {
+    const receipt = z
+      .strictObject({
+        activationId: resourceId,
+        tenantId: resourceId,
+        channelId: resourceId,
+        intent: idempotencyKey,
+        state: z.enum(["active", "revoked"]),
+        createdAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        revokedAt: z
+          .number()
+          .int()
+          .nonnegative()
+          .max(Number.MAX_SAFE_INTEGER)
+          .nullable(),
+        replayed: z.boolean(),
+      })
+      .parse(Object.fromEntries(fields.map((field) => [field, record[field]])));
+    if (
+      (receipt.state === "active" && receipt.revokedAt !== null) ||
+      (receipt.state === "revoked" &&
+        (receipt.revokedAt === null || receipt.revokedAt < receipt.createdAt))
+    )
+      throw new Error("invalid activation state");
+    return receipt;
+  } catch {
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected inbox activation receipt.",
+    );
+  }
+}
+
 // Identity only: no raw server body, provider detail or unknown field escapes.
 function pick(
   value: Readonly<Record<string, unknown>> | undefined,
@@ -525,6 +681,8 @@ export function toolEnabled(
   config: DaykeeperMcpConfig,
 ): boolean {
   if (metadata.requiresInboxTools && !config.enableInboxTools) return false;
+  if (metadata.requiresActivationTools && !config.enableActivationTools)
+    return false;
   if (metadata.effect === "read") return true;
   if (metadata.effect === "plan") return config.enablePlanning;
   // Enabling generic mutations must never silently enable flow writes.
@@ -555,6 +713,7 @@ export function registerTools(
     // Never wire a flow write to an SDK whose mutations cannot carry a key.
     if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
     if (definition.metadata.requiresInboxTools) assertInboxSdk();
+    if (definition.metadata.requiresActivationTools) assertActivationSdk();
     definition.register(server, execute);
   }
 }

@@ -54,6 +54,52 @@ async function copyChecked(from, to) {
   }
 }
 
+async function installedPackages(directory, env) {
+  const rows = JSON.parse(
+    (
+      await run("pnpm", ["list", "--depth", "Infinity", "--json"], {
+        cwd: directory,
+        env,
+      })
+    ).stdout,
+  );
+  const packages = new Set();
+  const seen = new Set();
+  async function visit(node) {
+    const parent = JSON.parse(
+      await readFile(join(node.path, "package.json"), "utf8"),
+    );
+    for (const kind of [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+    ])
+      for (const child of Object.values(node[kind] ?? {})) {
+        if (seen.has(child.path)) continue;
+        seen.add(child.path);
+        let value;
+        try {
+          value = JSON.parse(
+            await readFile(join(child.path, "package.json"), "utf8"),
+          );
+        } catch (error) {
+          // pnpm list includes optional binaries for other operating systems.
+          if (
+            error?.code === "ENOENT" &&
+            parent.optionalDependencies?.[child.from]
+          )
+            continue;
+          throw error;
+        }
+        if (value.name !== "@skyporch/daykeeper-mcp")
+          packages.add(`${value.name}@${value.version}`);
+        await visit(child);
+      }
+  }
+  for (const row of rows) await visit(row);
+  return [...packages].sort();
+}
+
 async function prepare(sdkTarball, outputDirectory) {
   const sdk = resolve(sdkTarball);
   const output = resolve(outputDirectory);
@@ -168,12 +214,13 @@ async function prepare(sdkTarball, outputDirectory) {
       `${JSON.stringify({ ...packedManifest, name: "daykeeper-mcp-connected-consumer", private: true, pnpm: { overrides: { ...packedManifest.pnpm?.overrides, "@skyporch/daykeeper": `file:${sdkLocal}` } } }, null, 2)}\n`,
     );
     await cp(join(source, "pnpm-lock.yaml"), join(consumer, "pnpm-lock.yaml"));
+    const lockedPackages = await installedPackages(source, env);
     stage = "install-consumer";
     await run(
       "pnpm",
       [
         "add",
-        "--offline",
+        "--prefer-offline",
         "--ignore-scripts",
         "--package-import-method=copy",
         "--save-exact",
@@ -185,6 +232,11 @@ async function prepare(sdkTarball, outputDirectory) {
         maxBuffer: 8 * 1024 * 1024,
       },
     );
+    // A cold runner may need registry metadata for the new local override.
+    // It must not silently select a different dependency graph from the
+    // frozen source installation. Only the packed MCP package is added.
+    stage = "verify-consumer-graph";
+    assert.deepEqual(await installedPackages(consumer, env), lockedPackages);
 
     await mkdir(output, { mode: 0o700 });
     const clientEntry = join(source, "client-entry.mjs");

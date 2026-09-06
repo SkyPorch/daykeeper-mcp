@@ -86,6 +86,14 @@ jobs:
           pnpm build
           mkdir "${RUNNER_TEMP}/daykeeper-sdk-artifact"
           npm pack --ignore-scripts --pack-destination "${RUNNER_TEMP}/daykeeper-sdk-artifact"
+      - name: Retain exact reviewed SDK artifact for cross-repo proof
+        if: matrix.node == 22
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: daykeeper-connected-sdk
+          path: ${{ runner.temp }}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz
+          if-no-files-found: error
+          retention-days: 7
       - name: Check adapter against packed SDK
         working-directory: adapter
         run: |

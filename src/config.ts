@@ -16,6 +16,8 @@ interface DaykeeperMcpBaseOptions {
   enableFlowWrites?: boolean;
   /** SDK-gated website planning and inbox/provisioning inspection. */
   enableInboxTools?: boolean;
+  /** SDK-gated inbox activation inspection and mutations. */
+  enableActivationTools?: boolean;
   /**
    * The exact scopes the configured credential is known to hold. Omitted means
    * the operator did not declare them; flow writes then refuse rather than
@@ -53,6 +55,7 @@ export interface DaykeeperMcpConfig {
   readonly enableMutations: boolean;
   readonly enableFlowWrites: boolean;
   readonly enableInboxTools: boolean;
+  readonly enableActivationTools: boolean;
   /** Undefined when the operator declared no scope list. */
   readonly scopes: readonly string[] | undefined;
 }
@@ -98,6 +101,7 @@ export function validateOptions(
       options.enableMutations,
       options.enableFlowWrites,
       options.enableInboxTools,
+      options.enableActivationTools,
     ]) {
       if (flag !== undefined && typeof flag !== "boolean")
         throw invalidConfig();
@@ -112,6 +116,7 @@ export function validateOptions(
       enableMutations: options.enableMutations ?? false,
       enableFlowWrites: options.enableFlowWrites ?? false,
       enableInboxTools: options.enableInboxTools ?? false,
+      enableActivationTools: options.enableActivationTools ?? false,
       scopes,
     });
   } catch {
@@ -148,6 +153,7 @@ export function readEnvironment(
     enableMutations: flag("DAYKEEPER_MCP_ENABLE_MUTATIONS"),
     enableFlowWrites: flag("DAYKEEPER_MCP_ENABLE_FLOW_WRITES"),
     enableInboxTools: flag("DAYKEEPER_MCP_ENABLE_INBOX_TOOLS"),
+    enableActivationTools: flag("DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS"),
     ...(scopes === undefined ? {} : { scopes }),
   };
   const config = validateOptions(options);
@@ -161,6 +167,7 @@ export function readEnvironment(
     enableMutations: config.enableMutations,
     enableFlowWrites: config.enableFlowWrites,
     enableInboxTools: config.enableInboxTools,
+    enableActivationTools: config.enableActivationTools,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
 }

@@ -51,7 +51,7 @@ for (const era of ["legacy", "modern"] as const) {
     assert.equal(metadata.credentialIssuance, false);
     assert.equal(metadata.credentialMode, "access_token");
     assert.equal(metadata.automaticRetries, false);
-    assert.equal(metadata.tools.length, 20);
+    assert.equal(metadata.tools.length, 23);
     assert.equal(metadata.flowWritesEnabled, false);
     assert.equal(metadata.declaredScopes, null);
     assert.equal(

@@ -68,7 +68,7 @@ jobs:
         with:
           repository: SkyPorch/daykeeper-node
           # Reviewed release candidate, not a mutable branch or published upgrade.
-          ref: b601a404ff23d1d55a686305c2b9c9754833ae34
+          ref: 5c046e0348f2e75b9d815340a151d784e7492920
           path: sdk-candidate
           persist-credentials: false
       - uses: pnpm/action-setup@v4

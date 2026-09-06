@@ -2,13 +2,14 @@ import { DaykeeperClient, type TenantSpec } from "@skyporch/daykeeper";
 import { McpAdapterError } from "./errors.ts";
 
 export const REQUIRED_INBOX_SDK_VERSION = "0.2.0";
-export interface WebsiteTenantSpec extends TenantSpec {
-  website: { websiteUrl: string; allowedOrigins?: string[] };
-}
+type InboxTenantSpec = Omit<TenantSpec, "administrator"> & {
+  administrator?: TenantSpec["administrator"];
+};
 export interface InboxSdk {
   websiteChannels: { get(tenantId: string): Promise<unknown> };
+  inboxes: { get(tenantId: string): Promise<unknown> };
   tenants: {
-    plan(spec: WebsiteTenantSpec): Promise<unknown>;
+    plan(spec: InboxTenantSpec): Promise<unknown>;
     getProvisioningOperation(tenantId: string): Promise<unknown>;
   };
 }
@@ -30,6 +31,7 @@ export function sdkSupportsInboxTools(value?: unknown): boolean {
     ) as Partial<InboxSdk>;
     return (
       typeof client?.websiteChannels?.get === "function" &&
+      typeof client?.inboxes?.get === "function" &&
       typeof client?.tenants?.getProvisioningOperation === "function" &&
       typeof client?.tenants?.plan === "function"
     );
@@ -42,7 +44,7 @@ export function assertInboxSdk(value?: unknown): void {
   if (!sdkSupportsInboxTools(value))
     throw new McpAdapterError(
       "SDK_TOO_OLD",
-      `Inbox tools require @skyporch/daykeeper ${REQUIRED_INBOX_SDK_VERSION} or newer with website and provisioning inspection support. Keep DAYKEEPER_MCP_ENABLE_INBOX_TOOLS false until the reviewed SDK is installed.`,
+      `Inbox tools require @skyporch/daykeeper ${REQUIRED_INBOX_SDK_VERSION} or newer with generic inbox, website and provisioning inspection support. Keep DAYKEEPER_MCP_ENABLE_INBOX_TOOLS false until the reviewed SDK is installed.`,
     );
 }
 export function inboxSdk(client: DaykeeperClient): InboxSdk {

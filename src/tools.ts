@@ -177,6 +177,18 @@ const definitions: readonly ToolDefinition[] = [
   define(
     {
       ...read(
+        "daykeeper_inboxes_get",
+        "Inspect an authorized inbox's preparation state. Prepared does not mean traffic is activated or a customer exchange succeeded.",
+        ["daykeeper.accounts:read"],
+      ),
+      requiresInboxTools: true,
+    },
+    tenant,
+    (client, input) => inboxSdk(client).inboxes.get(input.tenantId),
+  ),
+  define(
+    {
+      ...read(
         "daykeeper_website_channels_get",
         "Inspect a website inbox's preparation state. Prepared does not mean traffic is activated or a customer exchange succeeded.",
         ["daykeeper.accounts:read"],
@@ -210,7 +222,7 @@ const definitions: readonly ToolDefinition[] = [
       requiresInboxTools: true,
     },
     z.strictObject({
-      spec: tenantSpec.extend({
+      spec: tenantSpec.omit({ inbox: true }).extend({
         website: z.strictObject({
           websiteUrl: z.string().max(2048),
           allowedOrigins: z
@@ -303,7 +315,12 @@ const definitions: readonly ToolDefinition[] = [
       ["daykeeper.accounts:write"],
     ),
     z.strictObject({ spec: tenantSpec }),
-    (client, input) => client.tenants.plan(input.spec),
+    (client, input) => {
+      const administrator = input.spec.administrator;
+      if (input.spec.inbox !== undefined || administrator === undefined)
+        return inboxSdk(client).tenants.plan(input.spec);
+      return client.tenants.plan({ ...input.spec, administrator });
+    },
   ),
   define(
     change(

@@ -5,7 +5,6 @@ import {
   type EmailChannelSpec,
   type FlowDefinition,
   type PublishFlowVersionInput,
-  type TenantSpec,
 } from "@skyporch/daykeeper";
 import { z } from "zod";
 
@@ -40,8 +39,9 @@ export const tenantSpec = z.strictObject({
   locale: text(2, 35),
   region: text(2, 35).optional(),
   supportEmail: email.optional(),
-  administrator: z.strictObject({ name, email }),
-}) satisfies z.ZodType<TenantSpec>;
+  inbox: z.strictObject({ type: z.literal("api") }).optional(),
+  administrator: z.strictObject({ name, email }).optional(),
+});
 export const emailChannelSpec = z.strictObject({
   address: email,
   region: z

@@ -65,6 +65,7 @@ async function installedPackages(directory, env) {
     ).stdout,
   );
   const packages = new Set();
+  const optionalVersions = new Set();
   const overrides = {};
   const seen = new Set();
   async function visit(node) {
@@ -88,8 +89,18 @@ async function installedPackages(directory, env) {
           if (
             error?.code === "ENOENT" &&
             parent.optionalDependencies?.[child.from]
-          )
+          ) {
+            // pnpm list reads the frozen snapshot even when an optional
+            // platform binary has not been materialized in node_modules.
+            assert.match(
+              child.version,
+              /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/,
+            );
+            optionalVersions.add(`${child.from}@${child.version}`);
+            overrides[`${parent.name}@${parent.version}>${child.from}`] =
+              child.version;
             continue;
+          }
           throw error;
         }
         if (value.name !== "@skyporch/daykeeper-mcp")
@@ -110,7 +121,28 @@ async function installedPackages(directory, env) {
       }
   }
   for (const row of rows) await visit(row);
-  return { versions: [...packages].sort(), overrides };
+  return {
+    versions: [...packages].sort(),
+    optionalVersions: [...optionalVersions].sort(),
+    overrides,
+  };
+}
+
+export function assertPackageVersions(source, consumer) {
+  const sourceOnly = source.versions.filter(
+    (value) => !consumer.versions.includes(value),
+  );
+  const consumerOnly = consumer.versions.filter(
+    (value) =>
+      !source.versions.includes(value) &&
+      !source.optionalVersions.includes(value),
+  );
+  // Optional packages can materialize differently on cold runners, but they
+  // must have the exact version recorded in the frozen source snapshot.
+  assert.deepEqual(
+    { sourceOnly, consumerOnly },
+    { sourceOnly: [], consumerOnly: [] },
+  );
 }
 
 async function prepare(sdkTarball, outputDirectory) {
@@ -249,7 +281,8 @@ async function prepare(sdkTarball, outputDirectory) {
     // It must not silently select a different dependency graph from the
     // frozen source installation. Only the packed MCP package is added.
     stage = "verify-consumer-graph";
-    const consumerVersions = (await installedPackages(consumer, env)).versions;
+    const consumerPackages = await installedPackages(consumer, env);
+    const consumerVersions = consumerPackages.versions;
     if (
       JSON.stringify(consumerVersions) !==
       JSON.stringify(lockedPackages.versions)
@@ -274,7 +307,7 @@ async function prepare(sdkTarball, outputDirectory) {
         })}\n`,
       );
     }
-    assert.deepEqual(consumerVersions, lockedPackages.versions);
+    assertPackageVersions(lockedPackages, consumerPackages);
 
     await mkdir(output, { mode: 0o700 });
     const clientEntry = join(source, "client-entry.mjs");

@@ -237,12 +237,39 @@ and `daykeeper_website_channels_get` inspects preparation and `trafficEnabled`.
 These reads do not poll, retry, create resources or activate traffic. A prepared
 inbox is not evidence of a successful customer exchange. API-only planning needs
 no website, DNS or administrator metadata; traffic activation remains a separate
-unfinished platform capability.
+opt-in platform capability, exposed by the activation tools above.
 
 Checks cover schema/gate behavior, published SDK request parity, redaction,
 authorization denial, adversarial cancellation/transport and actual packed
 stdio sessions. Loopback fixtures are not production multi-tenant certification.
 No live accounts, DNS, billing or customer messages are created by the checks.
+
+### Connected-stack test artifact
+
+From a reviewed checkout with locked dependencies installed, build a test-only
+runtime for the platform's isolated connected journey:
+
+```sh
+node scripts/prepare-connected-mcp.mjs \
+  /absolute/skyporch-daykeeper-0.2.0.tgz \
+  /absolute/fresh-mcp-runtime
+```
+
+Only use a trusted, reviewed SDK tarball. The helper builds and packs MCP with
+that SDK in a temporary workspace, installs the resulting tarball in a separate
+consumer, and bundles the installed executable and protocol client. It leaves
+the release manifest and lockfile unchanged, removes its temporary workspace,
+and emits `cli.mjs`, `client.mjs`, `manifest.json`, and
+`THIRD_PARTY_NOTICES.txt`. A failed output is retained for inspection; use a fresh
+output path on the next attempt. Hashes identify the inputs and payloads, not a
+registry publication or an independent signature.
+
+The builder verifies real stdio initialization and tool discovery, without an API
+server. The platform's separate MCP-enabled journey then uses this runtime
+against a disposable real provider: SDK signup, MCP plan/apply/retry/activation,
+SDK customer exchanges, and cross-workspace read/revoke refusal. Run both that
+journey and its SDK-only baseline before updating a platform fixture. Neither
+the builder nor a successful disposable journey authorizes production changes.
 
 Design references: [Resend's MCP interface](https://resend.com/docs/mcp-server)
 for agent onboarding and [the official MCP SDK](https://ts.sdk.modelcontextprotocol.io/v2/)

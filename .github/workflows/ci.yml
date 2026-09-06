@@ -46,6 +46,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm check
+      - name: Check connected artifact preflight and bundled notices
+        run: node --test scripts/connected-mcp-notices.test.mjs scripts/prepare-connected-mcp.test.mjs
 
   sdk-candidate:
     runs-on: ubuntu-latest
@@ -81,3 +83,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm check:sdk-candidate "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz"
+      - name: Build installed MCP package and verify bundled stdio runtime
+        working-directory: adapter
+        run: |
+          node scripts/prepare-connected-mcp.mjs \
+            "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz" \
+            "${RUNNER_TEMP}/daykeeper-connected-mcp"

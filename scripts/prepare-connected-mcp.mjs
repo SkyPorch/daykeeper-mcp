@@ -249,10 +249,32 @@ async function prepare(sdkTarball, outputDirectory) {
     // It must not silently select a different dependency graph from the
     // frozen source installation. Only the packed MCP package is added.
     stage = "verify-consumer-graph";
-    assert.deepEqual(
-      (await installedPackages(consumer, env)).versions,
-      lockedPackages.versions,
-    );
+    const consumerVersions = (await installedPackages(consumer, env)).versions;
+    if (
+      JSON.stringify(consumerVersions) !==
+      JSON.stringify(lockedPackages.versions)
+    ) {
+      const safeNames = (values) =>
+        values
+          .filter((value) => /^[A-Za-z0-9@/_.+\-]{1,180}$/.test(value))
+          .slice(0, 32);
+      process.stderr.write(
+        `${JSON.stringify({
+          stage,
+          sourceOnly: safeNames(
+            lockedPackages.versions.filter(
+              (value) => !consumerVersions.includes(value),
+            ),
+          ),
+          consumerOnly: safeNames(
+            consumerVersions.filter(
+              (value) => !lockedPackages.versions.includes(value),
+            ),
+          ),
+        })}\n`,
+      );
+    }
+    assert.deepEqual(consumerVersions, lockedPackages.versions);
 
     await mkdir(output, { mode: 0o700 });
     const clientEntry = join(source, "client-entry.mjs");

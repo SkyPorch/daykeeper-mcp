@@ -72,6 +72,16 @@ async function installedPackages(directory, env) {
     const parent = JSON.parse(
       await readFile(join(node.path, "package.json"), "utf8"),
     );
+    // Frozen package metadata also pins native packages which pnpm list can
+    // omit entirely on another platform. Never resolve a range here.
+    for (const [name, version] of Object.entries(
+      parent.optionalDependencies ?? {},
+    )) {
+      if (/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) {
+        optionalVersions.add(`${name}@${version}`);
+        overrides[`${parent.name}@${parent.version}>${name}`] = version;
+      }
+    }
     for (const kind of [
       "dependencies",
       "devDependencies",

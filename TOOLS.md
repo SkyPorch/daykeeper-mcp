@@ -26,6 +26,7 @@ versions are positive integers. Unknown fields are rejected before dispatch.
 | `daykeeper_flow_versions_create`    | Flow write   | `daykeeper.flows:write`        |
 | `daykeeper_flow_versions_publish`   | Flow write   | `daykeeper.flows:publish`      |
 | `daykeeper_website_channels_get`    | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_inboxes_get`             | Read         | `daykeeper.accounts:read`      |
 | `daykeeper_tenant_provisioning_get` | Read         | `daykeeper.provisioning:read`  |
 | `daykeeper_website_inboxes_plan`    | Persist plan | `daykeeper.accounts:write`     |
 
@@ -37,13 +38,14 @@ silently enables them. Disabled tools are absent from `tools/list` and cannot be
 invoked by name. The resource catalog still describes them so hosts can explain
 what is missing.
 
-The three inbox tools additionally require `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true`
-and a reviewed SDK exposing both inbox and tenant provisioning inspection
+The four inbox tools additionally require `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true`
+and a reviewed SDK exposing generic inbox, website and tenant provisioning inspection
 (candidate 0.2.0). Website planning also requires the normal planning flag;
-generic mutations do not enable it. Both reads take `{tenantId}`; website planning
-takes `{spec}` containing the normal tenant fields plus required
-`website: {websiteUrl, allowedOrigins?}`. Unknown fields are rejected. Use the
-existing exact-plan apply tool separately. Preparing a website inbox does not
+generic mutations do not enable it. Inbox reads and provisioning inspection take
+`{tenantId}`; website planning takes `{spec}` containing the normal tenant fields
+plus required `website: {websiteUrl, allowedOrigins?}`. API-only planning uses
+`daykeeper_tenants_plan` with `inbox: {type: "api"}`. Unknown fields are rejected.
+Use the existing exact-plan apply tool separately. Preparing an inbox does not
 verify DNS, activate traffic or complete an end-user exchange.
 
 `DAYKEEPER_MCP_SCOPES` declares the exact scopes the configured credential

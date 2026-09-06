@@ -187,7 +187,7 @@ Before upgrading the pinned SDK, run `pnpm check:sdk-candidate /absolute/path/sd
 with a trusted locally built `@skyporch/daykeeper` tarball. This creates a separate
 consumer workspace, installs the candidate without install scripts, typechecks
 the adapter, and runs the full MCP test suite with zero skips, explicitly requiring
-all five flow and three inbox real-SDK dispatch cases. It records the artifact
+all five flow and five inbox real-SDK dispatch cases. It records the artifact
 SHA-256 and logs; it never changes the release
 manifest or lockfile. Candidate code executes during tests, so do not use an
 untrusted tarball. CI pins the reviewed SDK source commit for this check;
@@ -196,8 +196,8 @@ This proves injected-transport compatibility, not live flow execution.
 
 ## Programmatic inbox onboarding
 
-The unpublished `@skyporch/daykeeper@0.2.0` candidate adds the website inbox and
-tenant provisioning methods. CI pins source `b601a404ff23d1d55a686305c2b9c9754833ae34`
+The unpublished `@skyporch/daykeeper@0.2.0` candidate adds generic inbox, website inbox and
+tenant provisioning methods. CI pins source `5c046e0348f2e75b9d815340a151d784e7492920`
 and packs it separately; the release dependency/lockfile remain at 0.1.0.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.
@@ -208,14 +208,18 @@ or return owner private keys or issue signup credentials into transcripts.
 
 With the reviewed newer SDK and inbox/planning flags enabled, use
 `daykeeper_website_inboxes_plan` with an explicit tenant spec and `website`
-settings. Inspect its effects, then use existing `daykeeper_tenants_apply` with
-the exact plan/version and one caller-supplied idempotency key; that step still
-needs the independent mutation gate and server authorization.
+settings, or use `daykeeper_tenants_plan` with `inbox: {"type":"api"}` for an
+API-only inbox. Inspect its effects, then use existing
+`daykeeper_tenants_apply` with the exact plan/version and one caller-supplied
+idempotency key; that step still needs the independent mutation gate and server
+authorization. Use `daykeeper_inboxes_get` for either channel kind; use
+`daykeeper_website_channels_get` for website-only metadata.
 `daykeeper_tenant_provisioning_get` recovers the current operation by tenant ID,
 and `daykeeper_website_channels_get` inspects preparation and `trafficEnabled`.
-Neither read polls, retries, creates resources or activates traffic. A prepared
-inbox is not evidence of a successful customer exchange. These tools do not
-decide whether initial API-only traffic requires website/DNS setup.
+These reads do not poll, retry, create resources or activate traffic. A prepared
+inbox is not evidence of a successful customer exchange. API-only planning needs
+no website, DNS or administrator metadata; traffic activation remains a separate
+unfinished platform capability.
 
 Checks cover schema/gate behavior, published SDK request parity, redaction,
 authorization denial, adversarial cancellation/transport and actual packed

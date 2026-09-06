@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { assertInboxSdk, sdkSupportsInboxTools } from "../src/sdkInbox.ts";
 import { readEnvironment, validateOptions } from "../src/config.ts";
 import { createDaykeeperMcpServer } from "../src/index.ts";
 import { toolCatalog, toolDefinitions } from "../src/tools.ts";
 import { defaults } from "./helpers.ts";
-import { envelope, harness, TENANT, api, BASE_URL, TOKEN } from "./helpers.ts";
+import {
+  envelope,
+  harness,
+  TENANT,
+  api,
+  BASE_URL,
+  TOKEN,
+  deferred,
+  bounded,
+} from "./helpers.ts";
 
 const websiteSpec = {
   name: "Example company",
@@ -21,14 +31,15 @@ const websiteSpec = {
 test("inbox tools are SDK-gated and planning remains independently gated", () => {
   const names = [
     "daykeeper_website_channels_get",
+    "daykeeper_inboxes_get",
     "daykeeper_tenant_provisioning_get",
     "daykeeper_website_inboxes_plan",
   ];
   for (const [enableInboxTools, enablePlanning, count] of [
     [false, false, 0],
     [false, true, 0],
-    [true, false, 2],
-    [true, true, 3],
+    [true, false, 3],
+    [true, true, 4],
   ] as const) {
     const catalog = toolCatalog(
       validateOptions({ ...defaults, enableInboxTools, enablePlanning }),
@@ -82,6 +93,15 @@ for (const candidate of [
     options: {},
   },
   {
+    name: "generic inbox get",
+    tool: "daykeeper_inboxes_get",
+    input: { tenantId: TENANT },
+    path: `/v1/tenants/${TENANT}/inbox`,
+    data: { id: "inbox-1", tenantId: TENANT, spec: { type: "api" } },
+    method: "GET",
+    options: {},
+  },
+  {
     name: "tenant provisioning get",
     tool: "daykeeper_tenant_provisioning_get",
     input: { tenantId: TENANT },
@@ -98,6 +118,28 @@ for (const candidate of [
     data: { id: "plan-1", version: 1 },
     method: "POST",
     body: websiteSpec,
+    options: { enablePlanning: true },
+  },
+  {
+    name: "API-only tenant plan",
+    tool: "daykeeper_tenants_plan",
+    input: {
+      spec: {
+        name: "API workspace",
+        slug: "api-workspace",
+        locale: "en",
+        inbox: { type: "api" },
+      },
+    },
+    path: "/v1/tenant-plans",
+    data: { id: "plan-api-1", version: 1 },
+    method: "POST",
+    body: {
+      name: "API workspace",
+      slug: "api-workspace",
+      locale: "en",
+      inbox: { type: "api" },
+    },
     options: { enablePlanning: true },
   },
 ] as const) {
@@ -131,7 +173,7 @@ for (const candidate of [
     assert(listed);
     assert.equal(
       listed.annotations?.readOnlyHint,
-      candidate.name !== "website inbox plan",
+      !candidate.name.endsWith("plan"),
     );
     assert.equal(listed.annotations?.destructiveHint, false);
     const result = envelope(
@@ -143,6 +185,55 @@ for (const candidate of [
     assert.equal(result.ok, true);
     assert.deepEqual(result.data, candidate.data);
     assert.equal(calls, 1);
+    if (candidate.name === "generic inbox get") {
+      let refusedCalls = 0;
+      const refused = await harness(context, {
+        enableInboxTools: true,
+        fetch: async () => {
+          refusedCalls++;
+          return new Response(null, { status: 403 });
+        },
+      });
+      const denied = envelope(
+        await refused.callTool({
+          name: candidate.tool,
+          arguments: candidate.input,
+        }),
+      );
+      assert.equal(denied.ok, false);
+      assert.equal(denied.error?.status, 403);
+      assert.equal(refusedCalls, 1, "A forbidden inbox read must not retry");
+
+      const dispatched = deferred<void>();
+      let pendingCalls = 0;
+      let pendingSignal: AbortSignal | null | undefined;
+      const pending = await harness(context, {
+        enableInboxTools: true,
+        fetch: (_url, init) => {
+          pendingCalls++;
+          pendingSignal = init?.signal;
+          dispatched.resolve();
+          return new Promise<Response>(() => undefined);
+        },
+      });
+      const controller = new AbortController();
+      const rejected = assert.rejects(
+        pending.callTool(
+          { name: candidate.tool, arguments: candidate.input },
+          { signal: controller.signal },
+        ),
+      );
+      await bounded(dispatched.promise);
+      controller.abort();
+      await bounded(rejected);
+      await nextTurn();
+      assert.equal(pendingSignal?.aborted, true);
+      assert.equal(
+        pendingCalls,
+        1,
+        "Cancellation must not replay an inbox read",
+      );
+    }
   });
 }
 
@@ -169,9 +260,19 @@ test("inbox tool gate rejects enabled planning on an old SDK before network I/O"
 });
 
 test("inbox tools reject unknown fields and malformed identifiers before SDK dispatch", async () => {
-  const client = {} as never;
+  let calls = 0;
+  const dispatch = async () => {
+    calls++;
+    return {};
+  };
+  const client = {
+    inboxes: { get: dispatch },
+    websiteChannels: { get: dispatch },
+    tenants: { plan: dispatch, getProvisioningOperation: dispatch },
+  } as never;
   for (const name of [
     "daykeeper_website_channels_get",
+    "daykeeper_inboxes_get",
     "daykeeper_tenant_provisioning_get",
   ]) {
     const tool = toolDefinitions.find((tool) => tool.metadata.name === name)!;
@@ -194,5 +295,37 @@ test("inbox tools reject unknown fields and malformed identifiers before SDK dis
   );
   assert.throws(() =>
     plan.dispatch(client, { spec: { ...websiteSpec, website: undefined } }),
+  );
+  assert.throws(
+    () =>
+      plan.dispatch(client, {
+        spec: { ...websiteSpec, inbox: { type: "api" } },
+      }),
+    { name: "ZodError" },
+  );
+  const tenantPlan = toolDefinitions.find(
+    (tool) => tool.metadata.name === "daykeeper_tenants_plan",
+  )!;
+  for (const spec of [
+    {
+      name: "API workspace",
+      slug: "api-workspace",
+      locale: "en",
+      inbox: { type: "api", hostedUrl: "https://attacker.example.test" },
+    },
+    {
+      ...websiteSpec,
+      website: {
+        ...websiteSpec.website,
+        hostedUrl: "https://attacker.example.test",
+      },
+    },
+  ]) {
+    assert.throws(() => tenantPlan.dispatch(client, { spec }));
+  }
+  assert.equal(
+    calls,
+    0,
+    "Invalid plans and selectors must fail schema validation before SDK dispatch",
   );
 });

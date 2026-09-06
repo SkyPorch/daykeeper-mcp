@@ -28,6 +28,10 @@ is in the upstream contract it consumes through `@skyporch/daykeeper`.
 
 ### Added
 
+- Add candidate-gated generic inbox inspection and API-only planning without
+  administrator metadata. Preserve legacy administrator-backed SDK planning.
+  Reject conflicting website/API settings and applicant-supplied hosted URLs.
+  These tools inspect preparation; they do not activate customer traffic.
 - Add a private, local stdio MCP adapter over the exact published management SDK.
 - Add eight read tools and separately gated planning and mutation tools.
 - Preserve plan/version/idempotency boundaries with no automatic request replay.

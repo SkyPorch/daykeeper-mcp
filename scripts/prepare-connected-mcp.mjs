@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import {
   cp,
   lstat,
@@ -64,6 +65,7 @@ async function installedPackages(directory, env) {
     ).stdout,
   );
   const packages = new Set();
+  const overrides = {};
   const seen = new Set();
   async function visit(node) {
     const parent = JSON.parse(
@@ -75,15 +77,14 @@ async function installedPackages(directory, env) {
       "optionalDependencies",
     ])
       for (const child of Object.values(node[kind] ?? {})) {
-        if (seen.has(child.path)) continue;
-        seen.add(child.path);
         let value;
         try {
           value = JSON.parse(
             await readFile(join(child.path, "package.json"), "utf8"),
           );
         } catch (error) {
-          // pnpm list includes optional binaries for other operating systems.
+          // Optional packages can be absent from successful installations.
+          // A package present in only one still fails the set comparison.
           if (
             error?.code === "ENOENT" &&
             parent.optionalDependencies?.[child.from]
@@ -93,11 +94,23 @@ async function installedPackages(directory, env) {
         }
         if (value.name !== "@skyporch/daykeeper-mcp")
           packages.add(`${value.name}@${value.version}`);
+        if (value.name !== "@skyporch/daykeeper") {
+          const selector = `${parent.name}@${parent.version}>${value.name}`;
+          if (overrides[selector] !== undefined)
+            assert.equal(
+              overrides[selector],
+              value.version,
+              "Ambiguous dependency pin",
+            );
+          overrides[selector] = value.version;
+        }
+        if (seen.has(child.path)) continue;
+        seen.add(child.path);
         await visit(child);
       }
   }
   for (const row of rows) await visit(row);
-  return [...packages].sort();
+  return { versions: [...packages].sort(), overrides };
 }
 
 async function prepare(sdkTarball, outputDirectory) {
@@ -207,14 +220,14 @@ async function prepare(sdkTarball, outputDirectory) {
     );
     assert.deepEqual(await readFile("package.json"), releaseManifest);
     assert.deepEqual(await readFile("pnpm-lock.yaml"), releaseLock);
+    const lockedPackages = await installedPackages(source, env);
     const consumer = join(work, "consumer");
     await mkdir(consumer, { mode: 0o700 });
     await writeFile(
       join(consumer, "package.json"),
-      `${JSON.stringify({ ...packedManifest, name: "daykeeper-mcp-connected-consumer", private: true, pnpm: { overrides: { ...packedManifest.pnpm?.overrides, "@skyporch/daykeeper": `file:${sdkLocal}` } } }, null, 2)}\n`,
+      `${JSON.stringify({ ...packedManifest, name: "daykeeper-mcp-connected-consumer", private: true, pnpm: { overrides: { ...packedManifest.pnpm?.overrides, ...lockedPackages.overrides, "@skyporch/daykeeper": `file:${sdkLocal}` } } }, null, 2)}\n`,
     );
     await cp(join(source, "pnpm-lock.yaml"), join(consumer, "pnpm-lock.yaml"));
-    const lockedPackages = await installedPackages(source, env);
     stage = "install-consumer";
     await run(
       "pnpm",
@@ -236,7 +249,10 @@ async function prepare(sdkTarball, outputDirectory) {
     // It must not silently select a different dependency graph from the
     // frozen source installation. Only the packed MCP package is added.
     stage = "verify-consumer-graph";
-    assert.deepEqual(await installedPackages(consumer, env), lockedPackages);
+    assert.deepEqual(
+      (await installedPackages(consumer, env)).versions,
+      lockedPackages.versions,
+    );
 
     await mkdir(output, { mode: 0o700 });
     const clientEntry = join(source, "client-entry.mjs");
@@ -318,6 +334,15 @@ async function prepare(sdkTarball, outputDirectory) {
           sdkVersion: installed.version,
           sdkSha256: createHash("sha256")
             .update(await readFile(sdkLocal))
+            .digest("hex"),
+          // Compression implementations may produce different gzip bytes for
+          // the identical tar stream; retain both identities for auditability.
+          sdkTarSha256: createHash("sha256")
+            .update(
+              gunzipSync(await readFile(sdkLocal), {
+                maxOutputLength: 64 * 1024 * 1024,
+              }),
+            )
             .digest("hex"),
           sourceCommit: (
             await run("git", ["rev-parse", "HEAD"], { cwd: process.cwd() })

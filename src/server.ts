@@ -26,7 +26,11 @@ import {
   sdkSupportsActivationTools,
   REQUIRED_ACTIVATION_SDK_VERSION,
 } from "./sdkActivation.ts";
-import { assertOperatorSdk } from "./sdkOperator.ts";
+import {
+  assertOperatorSdk,
+  REQUIRED_OPERATOR_SDK_VERSION,
+  sdkSupportsOperatorConversations,
+} from "./sdkOperator.ts";
 
 export interface DaykeeperMcpRuntime {
   readonly transport: "stdio" | "streamable_http";
@@ -136,6 +140,8 @@ export function createDaykeeperMcpServerForRuntime(
             requiredActivationSdkVersion: REQUIRED_ACTIVATION_SDK_VERSION,
             operatorToolsEnabled: config.enableOperatorTools,
             operatorWritesEnabled: config.enableOperatorWrites,
+            operatorSdkSupported: sdkSupportsOperatorConversations(),
+            requiredOperatorSdkVersion: REQUIRED_OPERATOR_SDK_VERSION,
             declaredScopes: config.scopes ?? null,
             tools: toolCatalog(config),
           }),

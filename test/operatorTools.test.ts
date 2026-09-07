@@ -206,3 +206,29 @@ test("candidate SDK: operator reply network loss is single-dispatch and unknown"
   assert.equal(result.error?.mutationOutcome, "unknown");
   assert.equal(calls, 1);
 });
+
+test("candidate SDK: operator reply requires declared write scope", async (context) => {
+  if (!sdkSupportsOperatorConversations()) {
+    context.skip("installed SDK does not expose operator conversations");
+    return;
+  }
+  let calls = 0;
+  const client = await harness(context, {
+    enableMutations: true,
+    enableOperatorTools: true,
+    enableOperatorWrites: true,
+    fetch: async () => {
+      calls++;
+      return api({});
+    },
+  });
+  const result = envelope(
+    await client.callTool({
+      name: "daykeeper_operator_conversation_reply",
+      arguments: { tenantId: TENANT, conversationId: 42, content: "Reply" },
+    }),
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "SCOPES_NOT_DECLARED");
+  assert.equal(calls, 0);
+});

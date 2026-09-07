@@ -240,11 +240,15 @@ function assertScopes(
   // enforces read authorization.
   if (metadata.effect === "read") return;
   if (config.scopes === undefined) {
-    if (!metadata.requiresFlowWrites && !metadata.requiresActivationTools)
+    if (
+      !metadata.requiresFlowWrites &&
+      !metadata.requiresActivationTools &&
+      !metadata.requiresOperatorWrites
+    )
       return;
     throw new McpAdapterError(
       `SCOPES_NOT_DECLARED`,
-      `${metadata.requiresActivationTools ? "Inbox activation mutations" : "Flow writes"} require the exact scopes the configured ${config.credentialMode} credential holds to be declared in DAYKEEPER_MCP_SCOPES. This tool needs ${metadata.scopes.join(", ")}.`,
+      `${metadata.requiresActivationTools ? "Inbox activation mutations" : metadata.requiresOperatorWrites ? "Operator conversation replies" : "Flow writes"} require the exact scopes the configured ${config.credentialMode} credential holds to be declared in DAYKEEPER_MCP_SCOPES. This tool needs ${metadata.scopes.join(", ")}.`,
     );
   }
   const granted = config.scopes;

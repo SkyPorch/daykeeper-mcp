@@ -151,3 +151,58 @@ for (const candidate of [
     assert.equal(calls, 1);
   });
 }
+
+for (const failure of [401, 429, 500] as const) {
+  test(`candidate SDK: operator reply does not retry HTTP ${failure}`, async (context) => {
+    if (!sdkSupportsOperatorConversations()) {
+      context.skip("installed SDK does not expose operator conversations");
+      return;
+    }
+    let calls = 0;
+    const client = await harness(context, {
+      enableMutations: true,
+      enableOperatorTools: true,
+      enableOperatorWrites: true,
+      scopes: ["daykeeper.conversations:write"],
+      fetch: async () => {
+        calls++;
+        return api({ error: "rejected" }, failure);
+      },
+    });
+    const result = envelope(
+      await client.callTool({
+        name: "daykeeper_operator_conversation_reply",
+        arguments: { tenantId: TENANT, conversationId: 42, content: "Reply" },
+      }),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(calls, 1);
+  });
+}
+
+test("candidate SDK: operator reply network loss is single-dispatch and unknown", async (context) => {
+  if (!sdkSupportsOperatorConversations()) {
+    context.skip("installed SDK does not expose operator conversations");
+    return;
+  }
+  let calls = 0;
+  const client = await harness(context, {
+    enableMutations: true,
+    enableOperatorTools: true,
+    enableOperatorWrites: true,
+    scopes: ["daykeeper.conversations:write"],
+    fetch: async () => {
+      calls++;
+      throw new Error("connection lost");
+    },
+  });
+  const result = envelope(
+    await client.callTool({
+      name: "daykeeper_operator_conversation_reply",
+      arguments: { tenantId: TENANT, conversationId: 42, content: "Reply" },
+    }),
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.mutationOutcome, "unknown");
+  assert.equal(calls, 1);
+});

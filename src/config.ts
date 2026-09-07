@@ -18,6 +18,10 @@ interface DaykeeperMcpBaseOptions {
   enableInboxTools?: boolean;
   /** SDK-gated inbox activation inspection and mutations. */
   enableActivationTools?: boolean;
+  /** Explicit opt-in for tenant conversation reads. */
+  enableOperatorTools?: boolean;
+  /** Separate explicit approval for outgoing operator replies. */
+  enableOperatorWrites?: boolean;
   /**
    * The exact scopes the configured credential is known to hold. Omitted means
    * the operator did not declare them; flow writes then refuse rather than
@@ -56,6 +60,8 @@ export interface DaykeeperMcpConfig {
   readonly enableFlowWrites: boolean;
   readonly enableInboxTools: boolean;
   readonly enableActivationTools: boolean;
+  readonly enableOperatorTools: boolean;
+  readonly enableOperatorWrites: boolean;
   /** Undefined when the operator declared no scope list. */
   readonly scopes: readonly string[] | undefined;
 }
@@ -102,6 +108,8 @@ export function validateOptions(
       options.enableFlowWrites,
       options.enableInboxTools,
       options.enableActivationTools,
+      options.enableOperatorTools,
+      options.enableOperatorWrites,
     ]) {
       if (flag !== undefined && typeof flag !== "boolean")
         throw invalidConfig();
@@ -117,6 +125,8 @@ export function validateOptions(
       enableFlowWrites: options.enableFlowWrites ?? false,
       enableInboxTools: options.enableInboxTools ?? false,
       enableActivationTools: options.enableActivationTools ?? false,
+      enableOperatorTools: options.enableOperatorTools ?? false,
+      enableOperatorWrites: options.enableOperatorWrites ?? false,
       scopes,
     });
   } catch {
@@ -154,6 +164,8 @@ export function readEnvironment(
     enableFlowWrites: flag("DAYKEEPER_MCP_ENABLE_FLOW_WRITES"),
     enableInboxTools: flag("DAYKEEPER_MCP_ENABLE_INBOX_TOOLS"),
     enableActivationTools: flag("DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS"),
+    enableOperatorTools: flag("DAYKEEPER_MCP_ENABLE_OPERATOR_TOOLS"),
+    enableOperatorWrites: flag("DAYKEEPER_MCP_ENABLE_OPERATOR_WRITES"),
     ...(scopes === undefined ? {} : { scopes }),
   };
   const config = validateOptions(options);
@@ -168,6 +180,8 @@ export function readEnvironment(
     enableFlowWrites: config.enableFlowWrites,
     enableInboxTools: config.enableInboxTools,
     enableActivationTools: config.enableActivationTools,
+    enableOperatorTools: config.enableOperatorTools,
+    enableOperatorWrites: config.enableOperatorWrites,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
 }

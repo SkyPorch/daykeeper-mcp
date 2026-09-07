@@ -845,6 +845,8 @@ function validatePrincipal(
       enableFlowWrites: downstream.enableFlowWrites,
       enableInboxTools: downstream.enableInboxTools,
       enableActivationTools: downstream.enableActivationTools,
+      enableOperatorTools: downstream.enableOperatorTools,
+      enableOperatorWrites: downstream.enableOperatorWrites,
       scopes: Object.freeze([...downstream.scopes]),
       ...(principal.daykeeper.fetch
         ? { fetch: principal.daykeeper.fetch }

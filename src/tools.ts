@@ -16,6 +16,7 @@ import type { DaykeeperMcpConfig } from "./config.ts";
 import { McpAdapterError } from "./errors.ts";
 import { assertInboxSdk, inboxSdk } from "./sdkInbox.ts";
 import { activationSdk, assertActivationSdk } from "./sdkActivation.ts";
+import { operatorSdk, assertOperatorSdk } from "./sdkOperator.ts";
 import {
   assertFlowWriteSdk,
   idempotentFlows,
@@ -38,6 +39,8 @@ export interface ToolMetadata {
   requiresFlowWrites: boolean;
   requiresInboxTools?: boolean;
   requiresActivationTools?: boolean;
+  requiresOperatorTools?: boolean;
+  requiresOperatorWrites?: boolean;
 }
 export type Execute = (
   metadata: ToolMetadata,
@@ -107,6 +110,14 @@ function define<Schema extends z.ZodType>(
                 throw new McpAdapterError(
                   "TOOL_DISABLED",
                   "API-only inbox planning requires the inbox tools opt-in.",
+                );
+              if (
+                metadata.requiresOperatorWrites &&
+                !config.enableOperatorWrites
+              )
+                throw new McpAdapterError(
+                  "TOOL_DISABLED",
+                  "Operator replies require explicit write approval.",
                 );
               return this.dispatch(client, input, context.mcpReq.signal);
             },
@@ -214,6 +225,19 @@ const activationCreate = z.strictObject({
   tenantId: resourceId,
   idempotencyKey,
 });
+const operatorConversation = z.strictObject({
+  tenantId: resourceId,
+  conversationId: integer,
+});
+const operatorReply = operatorConversation.extend({
+  content: z
+    .string()
+    .min(1)
+    .max(4_000)
+    .refine((value) => value.trim().length > 0),
+});
+const operatorReadScope = "daykeeper.conversations:read" as DaykeeperScope;
+const operatorWriteScope = "daykeeper.conversations:write" as DaykeeperScope;
 
 const activationTool = (metadata: ToolMetadata): ToolMetadata => ({
   ...metadata,
@@ -551,6 +575,61 @@ const definitions: readonly ToolDefinition[] = [
         ),
       ),
   ),
+  define(
+    {
+      ...read(
+        "daykeeper_operator_conversations_list",
+        "List tenant-scoped support conversations. Provider credentials and internal references remain server-side.",
+        [operatorReadScope],
+      ),
+      requiresOperatorTools: true,
+    },
+    tenant,
+    (client, input, signal) =>
+      operatorSdk(client).operatorConversations.list(input.tenantId, {
+        signal,
+      }),
+  ),
+  define(
+    {
+      ...read(
+        "daykeeper_operator_conversation_messages",
+        "Read bounded messages for one tenant-scoped support conversation.",
+        [operatorReadScope],
+      ),
+      requiresOperatorTools: true,
+    },
+    operatorConversation,
+    (client, input, signal) =>
+      operatorSdk(client).operatorConversations.messages(
+        input.tenantId,
+        input.conversationId,
+        { signal },
+      ),
+  ),
+  define(
+    {
+      name: "daykeeper_operator_conversation_reply",
+      description:
+        "Send one plain-text reply to a tenant-scoped support conversation. Requires explicit operator write approval; never automatically retries an uncertain write.",
+      effect: "mutation",
+      scopes: [operatorWriteScope],
+      idempotent: false,
+      destructive: false,
+      requiresIdempotencyKey: false,
+      requiresFlowWrites: false,
+      requiresOperatorTools: true,
+      requiresOperatorWrites: true,
+    },
+    operatorReply,
+    (client, input, signal) =>
+      operatorSdk(client).operatorConversations.reply(
+        input.tenantId,
+        input.conversationId,
+        input.content,
+        { signal },
+      ),
+  ),
 ];
 
 const FLOW_FIELDS = [
@@ -710,6 +789,10 @@ export function toolEnabled(
   if (metadata.requiresInboxTools && !config.enableInboxTools) return false;
   if (metadata.requiresActivationTools && !config.enableActivationTools)
     return false;
+  if (metadata.requiresOperatorTools && !config.enableOperatorTools)
+    return false;
+  if (metadata.requiresOperatorWrites && !config.enableOperatorWrites)
+    return false;
   if (metadata.effect === "read") return true;
   if (metadata.effect === "plan") return config.enablePlanning;
   // Enabling generic mutations must never silently enable flow writes.
@@ -741,6 +824,7 @@ export function registerTools(
     if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
     if (definition.metadata.requiresInboxTools) assertInboxSdk();
     if (definition.metadata.requiresActivationTools) assertActivationSdk();
+    if (definition.metadata.requiresOperatorTools) assertOperatorSdk();
     definition.register(server, execute, config);
   }
 }

@@ -26,6 +26,7 @@ import {
   sdkSupportsActivationTools,
   REQUIRED_ACTIVATION_SDK_VERSION,
 } from "./sdkActivation.ts";
+import { assertOperatorSdk } from "./sdkOperator.ts";
 
 export interface DaykeeperMcpRuntime {
   readonly transport: "stdio" | "streamable_http";
@@ -81,6 +82,7 @@ export function createDaykeeperMcpServerForRuntime(
   if (config.enableFlowWrites) assertFlowWriteSdk();
   if (config.enableInboxTools) assertInboxSdk();
   if (config.enableActivationTools) assertActivationSdk();
+  if (config.enableOperatorTools) assertOperatorSdk();
   const server = new ScopedMcpServer(
     { name: "daykeeper", version: MCP_VERSION },
     {
@@ -132,6 +134,8 @@ export function createDaykeeperMcpServerForRuntime(
             activationToolsEnabled: config.enableActivationTools,
             activationSdkSupported: sdkSupportsActivationTools(),
             requiredActivationSdkVersion: REQUIRED_ACTIVATION_SDK_VERSION,
+            operatorToolsEnabled: config.enableOperatorTools,
+            operatorWritesEnabled: config.enableOperatorWrites,
             declaredScopes: config.scopes ?? null,
             tools: toolCatalog(config),
           }),

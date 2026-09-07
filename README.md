@@ -33,6 +33,8 @@ configuration file.
 | `DAYKEEPER_MCP_ENABLE_MUTATIONS`        | Exact `true` exposes three provisioning tools; default `false`.                                                                                        |
 | `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS`      | Exact `true` enables SDK-gated inbox/provisioning reads; website planning also needs the planning flag. Default `false`.                               |
 | `DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS` | Exact `true` exposes activation inspection with a compatible SDK. Create/revoke also need mutations and declared account-write scope. Default `false`. |
+| `DAYKEEPER_MCP_ENABLE_OPERATOR_TOOLS`   | Exact `true` exposes tenant-scoped operator conversation reads with a compatible SDK. Default `false`.                                                 |
+| `DAYKEEPER_MCP_ENABLE_OPERATOR_WRITES`  | Exact `true` separately approves the outgoing reply tool; it also needs mutations and the declared conversation-write scope. Default `false`.          |
 
 The pinned management SDK supports HTTP only on `localhost` or `127.0.0.1` for
 local development. IPv6 HTTP is not supported by that SDK version. Base paths

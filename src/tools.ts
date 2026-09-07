@@ -14,6 +14,8 @@ import {
 } from "./schemas.ts";
 import type { DaykeeperMcpConfig } from "./config.ts";
 import { McpAdapterError } from "./errors.ts";
+import { assertInboxSdk, inboxSdk } from "./sdkInbox.ts";
+import { activationSdk, assertActivationSdk } from "./sdkActivation.ts";
 import {
   assertFlowWriteSdk,
   idempotentFlows,
@@ -34,6 +36,8 @@ export interface ToolMetadata {
   requiresIdempotencyKey: boolean;
   /** Additionally gated behind DAYKEEPER_MCP_ENABLE_FLOW_WRITES. */
   requiresFlowWrites: boolean;
+  requiresInboxTools?: boolean;
+  requiresActivationTools?: boolean;
 }
 export type Execute = (
   metadata: ToolMetadata,
@@ -48,8 +52,16 @@ export interface ToolDefinition {
    * pipeline can be exercised directly against a client stub, independently of
    * the MCP protocol layer and of the installed SDK.
    */
-  dispatch(client: DaykeeperClient, input: unknown): Promise<unknown>;
-  register(server: McpServer, execute: Execute): void;
+  dispatch(
+    client: DaykeeperClient,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  register(
+    server: McpServer,
+    execute: Execute,
+    config: DaykeeperMcpConfig,
+  ): void;
 }
 
 function define<Schema extends z.ZodType>(
@@ -58,14 +70,15 @@ function define<Schema extends z.ZodType>(
   dispatch: (
     client: DaykeeperClient,
     input: z.output<Schema>,
+    signal?: AbortSignal,
   ) => Promise<unknown>,
 ): ToolDefinition {
   return {
     metadata: Object.freeze(metadata),
-    dispatch(client, input) {
-      return dispatch(client, inputSchema.parse(input));
+    dispatch(client, input, signal) {
+      return dispatch(client, inputSchema.parse(input), signal);
     },
-    register(server, execute) {
+    register(server, execute, config) {
       server.registerTool<typeof outputSchema, SafeInputSchema>(
         metadata.name,
         {
@@ -83,7 +96,20 @@ function define<Schema extends z.ZodType>(
           execute(
             metadata,
             input,
-            (client) => this.dispatch(client, input),
+            (client) => {
+              // Keep ordinary administrator plans visible, but require the
+              // dedicated inbox opt-in for the API-only candidate shape.
+              if (
+                metadata.name === "daykeeper_tenants_plan" &&
+                isInboxTenantPlan(input) &&
+                !config.enableInboxTools
+              )
+                throw new McpAdapterError(
+                  "TOOL_DISABLED",
+                  "API-only inbox planning requires the inbox tools opt-in.",
+                );
+              return this.dispatch(client, input, context.mcpReq.signal);
+            },
             context.mcpReq.signal,
           ),
       );
@@ -92,6 +118,16 @@ function define<Schema extends z.ZodType>(
 }
 
 type SafeInputSchema = Pick<z.ZodType, "~standard">;
+
+function isInboxTenantPlan(value: unknown): boolean {
+  if (!value || typeof value !== "object" || !("spec" in value)) return false;
+  const spec = value.spec;
+  return (
+    !!spec &&
+    typeof spec === "object" &&
+    ("inbox" in spec || !("administrator" in spec))
+  );
+}
 
 // Keep the exact advertised JSON schema while withholding caller-supplied
 // property names, values and parser diagnostics from protocol error messages.
@@ -170,8 +206,153 @@ const apply = z.strictObject({
   planVersion: integer,
   idempotencyKey,
 });
+const activation = z.strictObject({
+  tenantId: resourceId,
+  intent: idempotencyKey,
+});
+const activationCreate = z.strictObject({
+  tenantId: resourceId,
+  idempotencyKey,
+});
+
+const activationTool = (metadata: ToolMetadata): ToolMetadata => ({
+  ...metadata,
+  requiresActivationTools: true,
+});
 
 const definitions: readonly ToolDefinition[] = [
+  define(
+    activationTool(
+      read(
+        "daykeeper_inbox_activations_get",
+        "Inspect the activation receipt for one tenant and intent. Does not activate, revoke, poll or retry.",
+        ["daykeeper.accounts:read"],
+      ),
+    ),
+    activation,
+    (client, input, signal) =>
+      projectActivation(
+        activationSdk(client).inboxActivations.get(
+          input.tenantId,
+          input.intent,
+          {
+            signal,
+          },
+        ),
+        input.tenantId,
+        input.intent,
+      ),
+  ),
+  define(
+    activationTool({
+      ...change(
+        "daykeeper_inbox_activations_create",
+        "Create one inbox activation intent for an authorized tenant. Requires an explicit idempotency key; after an uncertain result, call daykeeper_inbox_activations_get with the same intent before any retry.",
+        "mutation",
+        ["daykeeper.accounts:write"],
+        true,
+        false,
+      ),
+    }),
+    activationCreate,
+    (client, input, signal) =>
+      projectActivation(
+        activationSdk(client).inboxActivations.create(input.tenantId, {
+          idempotencyKey: input.idempotencyKey,
+          signal,
+        }),
+        input.tenantId,
+        input.idempotencyKey,
+      ),
+  ),
+  define(
+    activationTool({
+      ...change(
+        "daykeeper_inbox_activations_revoke",
+        "Revoke one inbox activation intent for an authorized tenant. This is an explicit mutation; after an uncertain result, call daykeeper_inbox_activations_get with the same intent before any retry.",
+        "mutation",
+        ["daykeeper.accounts:write"],
+        true,
+        true,
+      ),
+      // Revocation targets the retained intent; it does not accept a new key.
+      requiresIdempotencyKey: false,
+    }),
+    activation,
+    (client, input, signal) =>
+      projectActivation(
+        activationSdk(client).inboxActivations.revoke(
+          input.tenantId,
+          input.intent,
+          {
+            signal,
+          },
+        ),
+        input.tenantId,
+        input.intent,
+      ),
+  ),
+  define(
+    {
+      ...read(
+        "daykeeper_inboxes_get",
+        "Inspect an authorized inbox's preparation state. Prepared does not mean traffic is activated or a customer exchange succeeded.",
+        ["daykeeper.accounts:read"],
+      ),
+      requiresInboxTools: true,
+    },
+    tenant,
+    (client, input) => inboxSdk(client).inboxes.get(input.tenantId),
+  ),
+  define(
+    {
+      ...read(
+        "daykeeper_website_channels_get",
+        "Inspect a website inbox's preparation state. Prepared does not mean traffic is activated or a customer exchange succeeded.",
+        ["daykeeper.accounts:read"],
+      ),
+      requiresInboxTools: true,
+    },
+    tenant,
+    (client, input) => inboxSdk(client).websiteChannels.get(input.tenantId),
+  ),
+  define(
+    {
+      ...read(
+        "daykeeper_tenant_provisioning_get",
+        "Find the current provisioning operation for an authorized tenant after reconnecting. Does not poll, retry, activate traffic or create resources.",
+        ["daykeeper.provisioning:read"],
+      ),
+      requiresInboxTools: true,
+    },
+    tenant,
+    (client, input) =>
+      inboxSdk(client).tenants.getProvisioningOperation(input.tenantId),
+  ),
+  define(
+    {
+      ...change(
+        "daykeeper_website_inboxes_plan",
+        "Persist an expiring tenant plan including a website inbox. Does not create an account, verify DNS or activate traffic. Inspect capabilities and review effects before applying the exact plan/version using daykeeper_tenants_apply.",
+        "plan",
+        ["daykeeper.accounts:write"],
+      ),
+      requiresInboxTools: true,
+    },
+    z.strictObject({
+      spec: tenantSpec.omit({ inbox: true }).extend({
+        website: z.strictObject({
+          websiteUrl: z.string().max(2048),
+          allowedOrigins: z
+            .array(z.string().max(2048))
+            .min(1)
+            .max(10)
+            .optional(),
+        }),
+      }),
+    }),
+    (client, input) => inboxSdk(client).tenants.plan(input.spec),
+  ),
   define(
     read(
       "daykeeper_capabilities",
@@ -252,7 +433,12 @@ const definitions: readonly ToolDefinition[] = [
       ["daykeeper.accounts:write"],
     ),
     z.strictObject({ spec: tenantSpec }),
-    (client, input) => client.tenants.plan(input.spec),
+    (client, input) => {
+      const administrator = input.spec.administrator;
+      if (input.spec.inbox !== undefined || administrator === undefined)
+        return inboxSdk(client).tenants.plan(input.spec);
+      return client.tenants.plan({ ...input.spec, administrator });
+    },
   ),
   define(
     change(
@@ -439,6 +625,71 @@ function projectFlowMutation(
   };
 }
 
+async function projectActivation(
+  pending: Promise<unknown>,
+  tenantId: string,
+  intent: string,
+): Promise<Record<string, unknown>> {
+  const value = await pending;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected inbox activation receipt.",
+    );
+  const record = value as Record<string, unknown>;
+  const fields = [
+    "activationId",
+    "tenantId",
+    "channelId",
+    "intent",
+    "state",
+    "createdAt",
+    "revokedAt",
+    "replayed",
+  ] as const;
+  if (
+    Object.keys(record).length !== fields.length ||
+    fields.some((field) => !(field in record)) ||
+    record.tenantId !== tenantId.toLowerCase() ||
+    record.intent !== intent
+  )
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected inbox activation receipt.",
+    );
+  try {
+    const receipt = z
+      .strictObject({
+        activationId: resourceId,
+        tenantId: resourceId,
+        channelId: resourceId,
+        intent: idempotencyKey,
+        state: z.enum(["active", "revoked"]),
+        createdAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        revokedAt: z
+          .number()
+          .int()
+          .nonnegative()
+          .max(Number.MAX_SAFE_INTEGER)
+          .nullable(),
+        replayed: z.boolean(),
+      })
+      .parse(Object.fromEntries(fields.map((field) => [field, record[field]])));
+    if (
+      (receipt.state === "active" && receipt.revokedAt !== null) ||
+      (receipt.state === "revoked" &&
+        (receipt.revokedAt === null || receipt.revokedAt < receipt.createdAt))
+    )
+      throw new Error("invalid activation state");
+    return receipt;
+  } catch {
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected inbox activation receipt.",
+    );
+  }
+}
+
 // Identity only: no raw server body, provider detail or unknown field escapes.
 function pick(
   value: Readonly<Record<string, unknown>> | undefined,
@@ -456,6 +707,9 @@ export function toolEnabled(
   metadata: ToolMetadata,
   config: DaykeeperMcpConfig,
 ): boolean {
+  if (metadata.requiresInboxTools && !config.enableInboxTools) return false;
+  if (metadata.requiresActivationTools && !config.enableActivationTools)
+    return false;
   if (metadata.effect === "read") return true;
   if (metadata.effect === "plan") return config.enablePlanning;
   // Enabling generic mutations must never silently enable flow writes.
@@ -485,6 +739,8 @@ export function registerTools(
     if (!toolEnabled(definition.metadata, config)) continue;
     // Never wire a flow write to an SDK whose mutations cannot carry a key.
     if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
-    definition.register(server, execute);
+    if (definition.metadata.requiresInboxTools) assertInboxSdk();
+    if (definition.metadata.requiresActivationTools) assertActivationSdk();
+    definition.register(server, execute, config);
   }
 }

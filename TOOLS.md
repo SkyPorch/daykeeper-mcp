@@ -7,24 +7,31 @@ versions are positive integers. Unknown fields are rejected before dispatch.
 
 ## Tools and required scopes
 
-| Tool                              | Effect       | API scope                      |
-| --------------------------------- | ------------ | ------------------------------ |
-| `daykeeper_capabilities`          | Read         | `daykeeper.accounts:read`      |
-| `daykeeper_tenants_list`          | Read         | `daykeeper.accounts:read`      |
-| `daykeeper_tenants_get`           | Read         | `daykeeper.accounts:read`      |
-| `daykeeper_email_channels_get`    | Read         | `daykeeper.accounts:read`      |
-| `daykeeper_operations_get`        | Read         | `daykeeper.provisioning:read`  |
-| `daykeeper_flows_list`            | Read         | `daykeeper.flows:read`         |
-| `daykeeper_flows_get`             | Read         | `daykeeper.flows:read`         |
-| `daykeeper_flow_versions_get`     | Read         | `daykeeper.flows:read`         |
-| `daykeeper_tenants_plan`          | Persist plan | `daykeeper.accounts:write`     |
-| `daykeeper_email_channels_plan`   | Persist plan | `daykeeper.accounts:write`     |
-| `daykeeper_tenants_apply`         | Execute      | `daykeeper.provisioning:apply` |
-| `daykeeper_email_channels_apply`  | Execute      | `daykeeper.provisioning:apply` |
-| `daykeeper_operations_retry`      | Execute      | `daykeeper.provisioning:apply` |
-| `daykeeper_flows_create`          | Flow write   | `daykeeper.flows:write`        |
-| `daykeeper_flow_versions_create`  | Flow write   | `daykeeper.flows:write`        |
-| `daykeeper_flow_versions_publish` | Flow write   | `daykeeper.flows:publish`      |
+| Tool                                 | Effect       | API scope                      |
+| ------------------------------------ | ------------ | ------------------------------ |
+| `daykeeper_capabilities`             | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_tenants_list`             | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_tenants_get`              | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_email_channels_get`       | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_operations_get`           | Read         | `daykeeper.provisioning:read`  |
+| `daykeeper_flows_list`               | Read         | `daykeeper.flows:read`         |
+| `daykeeper_flows_get`                | Read         | `daykeeper.flows:read`         |
+| `daykeeper_flow_versions_get`        | Read         | `daykeeper.flows:read`         |
+| `daykeeper_tenants_plan`             | Persist plan | `daykeeper.accounts:write`     |
+| `daykeeper_email_channels_plan`      | Persist plan | `daykeeper.accounts:write`     |
+| `daykeeper_tenants_apply`            | Execute      | `daykeeper.provisioning:apply` |
+| `daykeeper_email_channels_apply`     | Execute      | `daykeeper.provisioning:apply` |
+| `daykeeper_operations_retry`         | Execute      | `daykeeper.provisioning:apply` |
+| `daykeeper_flows_create`             | Flow write   | `daykeeper.flows:write`        |
+| `daykeeper_flow_versions_create`     | Flow write   | `daykeeper.flows:write`        |
+| `daykeeper_flow_versions_publish`    | Flow write   | `daykeeper.flows:publish`      |
+| `daykeeper_website_channels_get`     | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_inboxes_get`              | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_tenant_provisioning_get`  | Read         | `daykeeper.provisioning:read`  |
+| `daykeeper_website_inboxes_plan`     | Persist plan | `daykeeper.accounts:write`     |
+| `daykeeper_inbox_activations_create` | Activate     | `daykeeper.accounts:write`     |
+| `daykeeper_inbox_activations_get`    | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_inbox_activations_revoke` | Revoke       | `daykeeper.accounts:write`     |
 
 The first eight are enabled by default. Planning and mutation gates are
 independent; enabling mutation tools does not enable plan creation. The three
@@ -33,6 +40,28 @@ flow writes need both `DAYKEEPER_MCP_ENABLE_MUTATIONS=true` and
 silently enables them. Disabled tools are absent from `tools/list` and cannot be
 invoked by name. The resource catalog still describes them so hosts can explain
 what is missing.
+
+The four inbox tools additionally require `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true`
+and a reviewed SDK exposing generic inbox, website and tenant provisioning inspection
+(candidate 0.2.0). Website planning also requires the normal planning flag;
+generic mutations do not enable it. Inbox reads and provisioning inspection take
+`{tenantId}`; website planning takes `{spec}` containing the normal tenant fields
+plus required `website: {websiteUrl, allowedOrigins?}`. API-only planning uses
+`daykeeper_tenants_plan` with `inbox: {type: "api"}`. Unknown fields are rejected.
+Use the existing exact-plan apply tool separately. Preparing an inbox does not
+verify DNS, activate traffic or complete an end-user exchange.
+
+Activation tools require the independent `DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS`
+flag and a compatible SDK. They do not change the older inbox SDK probe. Create
+and revoke also require the mutation flag and an explicitly declared account-write
+scope. Create takes `{tenantId, idempotencyKey}`; get/revoke take `{tenantId, intent}`.
+The key/intent is 16–128 characters from `[A-Za-z0-9._:-]`. Create is explicit:
+neither planning nor inspecting an inbox activates it. Only public receipt fields
+are returned; installation bindings and role identifiers are not exposed.
+The API requires machine-owner authentication and performs all tenant checks.
+An `active` receipt is retained state, not a live-traffic attestation. Inspect
+the inbox for current traffic readiness; reconcile an uncertain write by reading
+the same intent. No operation is automatically retried.
 
 `DAYKEEPER_MCP_SCOPES` declares the exact scopes the configured credential
 holds. When it is set, any **write** tool whose required scope is missing is

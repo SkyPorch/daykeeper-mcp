@@ -54,3 +54,54 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm check
+      - name: Check connected artifact preflight and bundled notices
+        run: node --test scripts/connected-mcp-notices.test.mjs scripts/prepare-connected-mcp.test.mjs
+
+  sdk-candidate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: adapter
+      - uses: actions/checkout@v4
+        with:
+          repository: SkyPorch/daykeeper-node
+          # Reviewed release candidate, not a mutable branch or published upgrade.
+          ref: c9d67753465af85f46a0f473ffdc77bd6bd80320
+          path: sdk-candidate
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.8.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build trusted candidate artifact
+        working-directory: sdk-candidate
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm build
+          mkdir "${RUNNER_TEMP}/daykeeper-sdk-artifact"
+          npm pack --ignore-scripts --pack-destination "${RUNNER_TEMP}/daykeeper-sdk-artifact"
+      - name: Retain exact reviewed SDK artifact for cross-repo proof
+        if: matrix.node == 22
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: daykeeper-connected-sdk
+          path: ${{ runner.temp }}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Check adapter against packed SDK
+        working-directory: adapter
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm check:sdk-candidate "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz"
+      - name: Build installed MCP package and verify bundled stdio runtime
+        working-directory: adapter
+        run: |
+          node scripts/prepare-connected-mcp.mjs \
+            "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.2.0.tgz" \
+            "${RUNNER_TEMP}/daykeeper-connected-mcp"

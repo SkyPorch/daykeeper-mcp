@@ -287,6 +287,36 @@ test("disabled tools and arbitrary transport/auth parameters cannot dispatch", a
   assert.equal(calls, 0);
 });
 
+for (const spec of [
+  {
+    name: "Example company",
+    slug: "example-company",
+    locale: "en",
+    inbox: { type: "api" },
+  },
+  { name: "Example company", slug: "example-company", locale: "en" },
+]) {
+  test("API-only tenant plans require the inbox opt-in before dispatch", async (context) => {
+    let calls = 0;
+    const client = await harness(context, {
+      enablePlanning: true,
+      fetch: async () => {
+        calls++;
+        return api({ id: TENANT });
+      },
+    });
+    const result = envelope(
+      await client.callTool({
+        name: "daykeeper_tenants_plan",
+        arguments: { spec },
+      }),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.code, "TOOL_DISABLED");
+    assert.equal(calls, 0);
+  });
+}
+
 test("strict plans and idempotency fail before dispatch", async (context) => {
   let calls = 0;
   const client = await harness(context, {

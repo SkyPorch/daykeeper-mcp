@@ -57,7 +57,11 @@ export interface ToolDefinition {
     input: unknown,
     signal?: AbortSignal,
   ): Promise<unknown>;
-  register(server: McpServer, execute: Execute): void;
+  register(
+    server: McpServer,
+    execute: Execute,
+    config: DaykeeperMcpConfig,
+  ): void;
 }
 
 function define<Schema extends z.ZodType>(
@@ -74,7 +78,7 @@ function define<Schema extends z.ZodType>(
     dispatch(client, input, signal) {
       return dispatch(client, inputSchema.parse(input), signal);
     },
-    register(server, execute) {
+    register(server, execute, config) {
       server.registerTool<typeof outputSchema, SafeInputSchema>(
         metadata.name,
         {
@@ -92,7 +96,20 @@ function define<Schema extends z.ZodType>(
           execute(
             metadata,
             input,
-            (client) => this.dispatch(client, input, context.mcpReq.signal),
+            (client) => {
+              // Keep ordinary administrator plans visible, but require the
+              // dedicated inbox opt-in for the API-only candidate shape.
+              if (
+                metadata.name === "daykeeper_tenants_plan" &&
+                isInboxTenantPlan(input) &&
+                !config.enableInboxTools
+              )
+                throw new McpAdapterError(
+                  "TOOL_DISABLED",
+                  "API-only inbox planning requires the inbox tools opt-in.",
+                );
+              return this.dispatch(client, input, context.mcpReq.signal);
+            },
             context.mcpReq.signal,
           ),
       );
@@ -101,6 +118,16 @@ function define<Schema extends z.ZodType>(
 }
 
 type SafeInputSchema = Pick<z.ZodType, "~standard">;
+
+function isInboxTenantPlan(value: unknown): boolean {
+  if (!value || typeof value !== "object" || !("spec" in value)) return false;
+  const spec = value.spec;
+  return (
+    !!spec &&
+    typeof spec === "object" &&
+    ("inbox" in spec || !("administrator" in spec))
+  );
+}
 
 // Keep the exact advertised JSON schema while withholding caller-supplied
 // property names, values and parser diagnostics from protocol error messages.
@@ -714,6 +741,6 @@ export function registerTools(
     if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
     if (definition.metadata.requiresInboxTools) assertInboxSdk();
     if (definition.metadata.requiresActivationTools) assertActivationSdk();
-    definition.register(server, execute);
+    definition.register(server, execute, config);
   }
 }

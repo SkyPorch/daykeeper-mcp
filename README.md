@@ -190,7 +190,7 @@ Before upgrading the pinned SDK, run `pnpm check:sdk-candidate /absolute/path/sd
 with a trusted locally built `@skyporch/daykeeper` tarball. This creates a separate
 consumer workspace, installs the candidate without install scripts, typechecks
 the adapter, and runs the full MCP test suite with zero skips, explicitly requiring
-all five flow, five inbox and four activation real-SDK cases. It records the artifact
+all five flow, five inbox, four activation and seven operator conversation real-SDK cases. It records the artifact
 SHA-256 and logs; it never changes the release
 manifest or lockfile. Candidate code executes during tests, so do not use an
 untrusted tarball. CI pins the reviewed SDK source commit for this check;
@@ -200,7 +200,7 @@ This proves injected-transport compatibility, not live flow execution.
 ## Programmatic inbox onboarding
 
 The unpublished `@skyporch/daykeeper@0.2.0` candidate adds generic inbox, website inbox and
-tenant provisioning and activation methods. CI pins source `c9d67753465af85f46a0f473ffdc77bd6bd80320`
+tenant provisioning and activation methods. CI pins source `25d97ecaad57e81e945052373f175826bfc33037`
 and packs it separately; the release dependency/lockfile remain at 0.1.0.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.

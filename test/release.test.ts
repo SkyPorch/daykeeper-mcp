@@ -23,3 +23,20 @@ test("release guard requires explicit owner approval", async () => {
     },
   );
 });
+
+test("release guard checks versions for tags, not manual dry runs", async () => {
+  const run = (env: NodeJS.ProcessEnv) =>
+    promisify(execFile)(process.execPath, ["scripts/verify-release.mjs"], {
+      cwd: new URL("../", import.meta.url),
+      env: { PATH: process.env.PATH, DAYKEEPER_RELEASE_APPROVED: "1", ...env },
+      timeout: 2_000,
+    });
+
+  await assert.doesNotReject(
+    run({ GITHUB_REF_NAME: "main", GITHUB_REF_TYPE: "branch" }),
+  );
+  await assert.rejects(
+    run({ GITHUB_REF_NAME: "v0.1.0", GITHUB_REF_TYPE: "tag" }),
+    /Git tag must match package version/,
+  );
+});

@@ -19,7 +19,7 @@ assert.equal(
   "1",
   "An owner-approved release is required",
 );
-if (process.env.GITHUB_REF_NAME)
+if (process.env.GITHUB_REF_TYPE === "tag" && process.env.GITHUB_REF_NAME)
   assert.equal(
     process.env.GITHUB_REF_NAME,
     `v${manifest.version}`,

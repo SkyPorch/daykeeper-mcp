@@ -30,7 +30,17 @@ attestation, and every release after it inherits that. Until then, treat any
 3. Review a release PR that updates the version and changelog, confirms
    `private: false`, and preserves the release guard.
 4. Publish the first approved version interactively. npm cannot stage a
-   brand-new package.
+   brand-new package. From the reviewed release commit, the exact bootstrap
+   command is:
+
+   ```sh
+   DAYKEEPER_RELEASE_APPROVED=1 npm publish --access public --provenance=false --tag latest
+   ```
+
+   This is the one-time owner-authenticated exception to the normal provenance
+   workflow; complete npm 2FA in the browser when prompted. Do not reuse this
+   command for later releases.
+
 5. Configure the package's npm trusted publisher for organization `SkyPorch`,
    repository `daykeeper-mcp`, workflow `release.yml`, environment
    `daykeeper-npm-production`, and **stage publish only**.

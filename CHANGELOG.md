@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.2.0
 
 ### Breaking
 
-The management contract this package consumes moves to 0.2.0, which is a
+The management contract this package consumes moves to 1.1.0, which is a
 breaking contract change:
 
 - Flow mutations now require an `Idempotency-Key` request header. The header is
@@ -18,13 +18,14 @@ breaking contract change:
   outcome is reported as `outcome: "unknown"` with inspect-before-retry
   guidance.
 
-The package version stays 0.1.0 and remains private and unpublished; the break
-is in the upstream contract it consumes through `@skyporch/daykeeper`.
+This release consumes the management contract through
+`@skyporch/daykeeper@0.2.0`.
 
 ### Contract
 
-- Consumes the Daykeeper MANAGEMENT contract 0.2.0 via `@skyporch/daykeeper`
-  0.1.0. See `COMPATIBILITY.md` for the contract tag and commit.
+- Consumes the Daykeeper MANAGEMENT contract 1.1.0 via
+  `@skyporch/daykeeper` 0.2.0. See `COMPATIBILITY.md` for the contract tag and
+  commit.
 
 ### Added
 
@@ -32,7 +33,7 @@ is in the upstream contract it consumes through `@skyporch/daykeeper`.
   administrator metadata. Preserve legacy administrator-backed SDK planning.
   Reject conflicting website/API settings and applicant-supplied hosted URLs.
   These tools inspect preparation; they do not activate customer traffic.
-- Add a private, local stdio MCP adapter over the exact published management SDK.
+- Add a local stdio MCP adapter over the exact published management SDK.
 - Add eight read tools and separately gated planning and mutation tools.
 - Preserve plan/version/idempotency boundaries with no automatic request replay.
 - Add structured, redacted results, bounded transport, cancellation and concurrency.

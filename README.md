@@ -1,8 +1,8 @@
 # Daykeeper MCP
 
 A local Model Context Protocol adapter for the Daykeeper management API,
-published by SkyPorch as `@skyporch/daykeeper-mcp` after release approval.
-This foundation is private, unpublished and read-only by default. It supports a
+distributed by SkyPorch as `@skyporch/daykeeper-mcp` after its owner-approved
+release. It supports a
 separately issued scoped API key for headless local use and exports a secured,
 fetch-native Streamable HTTP mounting primitive. It does not deploy a hosted
 endpoint, run an authorization server or issue credentials.
@@ -18,7 +18,8 @@ pnpm check
 pnpm check:cold
 ```
 
-Configure your MCP host to run `node /absolute/path/to/daykeeper-mcp/dist/cli.js`
+Once the package is available from npm, configure your MCP host to run
+`npx --yes @skyporch/daykeeper-mcp`
 with these variables supplied through the host's protected environment or
 secret manager. Never put a real token in arguments, prompts or a checked-in
 configuration file.
@@ -118,8 +119,7 @@ an explicit idempotency key for apply. No tool invents a plan, confirmation,
 organization, role, scope or billing approval on behalf of the caller.
 
 Local flags and MCP annotations are safety hints, not authorization. Every tool
-uses the pinned `@skyporch/daykeeper@0.1.0` client against the configured API
-(new inbox/flow surfaces require a separately reviewed SDK candidate upgrade),
+uses the pinned `@skyporch/daykeeper@0.2.0` client against the configured API
 which must enforce current principal status, scopes, tenant ownership and
 quotas. Do not share one adapter process/credential between untrusted principals.
 Returned customer names, descriptions and flow text are untrusted data, not
@@ -141,11 +141,9 @@ access and retention controls.
 
 ## Release and activation gates
 
-`private: true`, a publication guard and no publishing workflow keep this
-foundation out of npm. A separate owner-approved release must review the source
-and tarball, pass checks, set the reviewed version/changelog and `private: false`,
-and set `DAYKEEPER_RELEASE_APPROVED=1`. Documentation of a package name is not
-proof it is available from the registry.
+The package is published to npm only after an owner-approved release reviews the
+source and tarball, passes checks, and sets `DAYKEEPER_RELEASE_APPROVED=1`.
+Verify the package version and provenance in the npm registry before use.
 
 CI scans the complete candidate history with a checksum-pinned Gitleaks binary.
 The one ignored fingerprint is an exact historical synthetic fixture credential;
@@ -199,9 +197,9 @@ This proves injected-transport compatibility, not live flow execution.
 
 ## Programmatic inbox onboarding
 
-The unpublished `@skyporch/daykeeper@0.2.0` candidate adds generic inbox, website inbox and
-tenant provisioning and activation methods. CI pins source `25d97ecaad57e81e945052373f175826bfc33037`
-and packs it separately; the release dependency/lockfile remain at 0.1.0.
+The `@skyporch/daykeeper@0.2.0` dependency adds generic inbox, website inbox and
+tenant provisioning and activation methods. CI pins the reviewed source commit
+`1eff7fbe9d63b3b4a89a0178ca1a7afe5b4ae914` and packs it separately.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.
 

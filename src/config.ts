@@ -1,7 +1,7 @@
 import { McpAdapterError } from "./errors.ts";
 
-export const MCP_VERSION = "0.1.0";
-export const SDK_VERSION = "0.1.0";
+export const MCP_VERSION = "0.2.0";
+export const SDK_VERSION = "0.2.0";
 export const ENVELOPE_VERSION = "1.0";
 export const MAX_RESPONSE_BYTES = 1_048_576;
 export const MAX_INPUT_BYTES = 524_288;

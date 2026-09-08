@@ -1,7 +1,7 @@
 {
   "name": "@skyporch/daykeeper-mcp",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "private": false,
   "description": "Scoped Model Context Protocol adapter for the Daykeeper management API",
   "type": "module",
   "sideEffects": false,
@@ -64,7 +64,7 @@
   "homepage": "https://github.com/SkyPorch/daykeeper-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "@skyporch/daykeeper": "0.1.0",
+    "@skyporch/daykeeper": "0.2.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

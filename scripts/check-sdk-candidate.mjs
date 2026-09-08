@@ -46,6 +46,7 @@ for (const name of [
   "package.json",
   "pnpm-lock.yaml",
   "tsconfig.json",
+  "CHANGELOG.md",
   "src",
   "test",
   "scripts",
@@ -101,6 +102,12 @@ const installed = JSON.parse(
   ),
 );
 assert.equal(installed.name, "@skyporch/daykeeper");
+// The candidate install rewrites the consumer manifest to a file dependency.
+// Restore the reviewed release metadata before running tests so the release
+// guard is exercised against the real publishable manifest while node_modules
+// still resolves the packed candidate SDK.
+await writeFile(join(source, "package.json"), originalManifest);
+await writeFile(join(source, "pnpm-lock.yaml"), originalLock);
 await execute("typecheck", "pnpm", ["typecheck"]);
 const candidateTests = (await readdir("test"))
   .filter((name) => name.endsWith(".test.ts"))

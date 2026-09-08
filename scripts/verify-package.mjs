@@ -18,7 +18,7 @@ import { toolEnvironment } from "./tooling.mjs";
 const manifest = JSON.parse(await readFile("package.json", "utf8"));
 assert.equal(manifest.name, "@skyporch/daykeeper-mcp");
 assert.equal(manifest.license, "Apache-2.0");
-assert.equal(manifest.dependencies["@skyporch/daykeeper"], "0.1.0");
+assert.equal(manifest.dependencies["@skyporch/daykeeper"], "0.2.0");
 assert.equal(manifest.dependencies["@modelcontextprotocol/server"], "2.0.0");
 for (const group of [
   manifest.dependencies,
@@ -231,7 +231,7 @@ try {
       [
         flag,
         "-e",
-        `${code}; if (typeof sdk.createDaykeeperMcpServer !== 'function' || sdk.SDK_VERSION !== '0.1.0') throw new Error('Invalid package export')`,
+        `${code}; if (typeof sdk.createDaykeeperMcpServer !== 'function' || sdk.SDK_VERSION !== '0.2.0') throw new Error('Invalid package export')`,
       ],
       { cwd: extracted, stdio: "pipe", timeout: 5_000 },
     );

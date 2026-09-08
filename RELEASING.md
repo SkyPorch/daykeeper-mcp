@@ -1,8 +1,9 @@
 # Releasing `@skyporch/daykeeper-mcp`
 
-The package is private and unpublished. A merged workflow cannot stage or
-publish a package by itself; only a matching GitHub Release can enter the
-protected staging job.
+The package is prepared for publication through a protected GitHub Release.
+The first version requires one owner-authenticated bootstrap publish because npm
+cannot stage a package that does not yet exist; later releases use the protected
+OIDC workflow.
 
 ## Provenance status
 
@@ -26,8 +27,8 @@ attestation, and every release after it inherits that. Until then, treat any
 
 1. Review and merge the complete MCP stack and its full-history scan.
 2. Make the repository public only after separate visibility approval.
-3. Review a release PR that updates the version and changelog, removes
-   `private: true`, and preserves the release guard.
+3. Review a release PR that updates the version and changelog, confirms
+   `private: false`, and preserves the release guard.
 4. Publish the first approved version interactively. npm cannot stage a
    brand-new package.
 5. Configure the package's npm trusted publisher for organization `SkyPorch`,

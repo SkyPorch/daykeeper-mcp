@@ -57,7 +57,7 @@ export async function verifyExecutable(bin) {
   assert.match(help.stdout, /DAYKEEPER_API_KEY/);
   assert.match(help.stdout, /DAYKEEPER_ACCESS_TOKEN/);
   assert.equal(help.stderr, "");
-  assert.equal((await command(bin, ["--version"])).stdout.trim(), "0.1.0");
+  assert.equal((await command(bin, ["--version"])).stdout.trim(), "0.2.0");
   for (const args of [[], ["--access-token", TOKEN]]) {
     const invalid = await command(bin, args);
     assert.equal(invalid.exitCode, 1);

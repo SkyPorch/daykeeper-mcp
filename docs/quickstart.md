@@ -44,7 +44,7 @@ enabled.
 ## Enabling flow writes
 
 Flow writes need both gates plus a declared scope list, and every flow write
-requires a caller-supplied idempotency key (management contract 0.2.0):
+requires a caller-supplied idempotency key (management contract 1.1.0):
 
 ```json
 "env": {

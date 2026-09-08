@@ -1,6 +1,6 @@
 # Daykeeper MCP tool contract
 
-Adapter envelope version 1.0; published management SDK 0.1.0. Tools pass validated
+Adapter envelope version 1.0; published management SDK 0.2.0. Tools pass validated
 inputs to that SDK; they do not bypass the API or issue SQL/provider requests.
 All inputs are strict objects. Resource identifiers are exact UUIDs and
 versions are positive integers. Unknown fields are rejected before dispatch.
@@ -43,7 +43,7 @@ what is missing.
 
 The four inbox tools additionally require `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true`
 and a reviewed SDK exposing generic inbox, website and tenant provisioning inspection
-(candidate 0.2.0). Website planning also requires the normal planning flag;
+(0.2.0). Website planning also requires the normal planning flag;
 generic mutations do not enable it. Inbox reads and provisioning inspection take
 `{tenantId}`; website planning takes `{spec}` containing the normal tenant fields
 plus required `website: {websiteUrl, allowedOrigins?}`. API-only planning uses

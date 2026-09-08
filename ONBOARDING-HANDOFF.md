@@ -15,15 +15,16 @@ Aggregate branch `codex/daykeeper-mcp-release-aggregate` is based on current
 - Local metadata reports the new gates. Default eight reads remain unchanged;
   the three new tools are hidden and inaccessible until explicitly enabled.
 - CI pins Node SDK source commit
-  `c9d67753465af85f46a0f473ffdc77bd6bd80320`, packs it and runs the entire MCP
+  `1eff7fbe9d63b3b4a89a0178ca1a7afe5b4ae914`, packs it and runs the entire MCP
   test suite in an isolated consumer with zero skips. The five flow, five inbox,
   and four activation candidate dispatch cases are mandatory. Release dependency
-  and lock remain 0.1.0.
+  and lock are now 0.2.0.
 
 ## Boundaries and remaining work
 
 No package publication, dependency upgrade, merge, deployment or live account
-mutation was performed. The package remains private/unpublished. Existing
+mutation was performed. The package is release-ready but still requires its
+owner-approved bootstrap publication. Existing
 `.npm-cache/` is unrelated untracked local state and was left untouched.
 
 Tests use injected API responses, not the production management API or provider.
@@ -39,10 +40,9 @@ the owner's product choice; these inspection/planning tools do not choose it.
 Billing remains paused. Do not equate `prepared` or a succeeded operation with
 `trafficEnabled` or verified end-user delivery.
 
-Release approval must separately review and publish the required SDK version,
-update the MCP release dependency/lockfile and version, then pass cold/package
-checks and the existing publication guards. Do not enable candidate-only tools
-with the current 0.1.0 release SDK or claim that installing it enables them.
+The owner-approved bootstrap publication must still be performed once the
+release PR is merged. Do not claim the package is installable until npm shows
+the released version and its provenance.
 
 ## Validation
 
@@ -51,8 +51,9 @@ candidate-only dispatches skipped as expected, plus build, modern/legacy stdio
 smoke and reproducible packed-package checks. Against the isolated trusted SDK
 tarball, the candidate suite must pass with zero skips, including the five flow,
 five inbox and four activation dispatch cases. The aggregate PR records the
-candidate artifact and source provenance; the release manifest remains 0.1.0.
-The release manifest and lockfile were unchanged. Direct/independent focused
+candidate artifact and source provenance; the release manifest is 0.2.0.
+The release manifest and lockfile were unchanged during the aggregate work.
+Direct/independent focused
 review found no remaining production issue; source-exporting review commands
 were not run under the owner restriction. Local execution used Node v25.6.1;
 hosted CI additionally targets Node 20, 22 and 24.

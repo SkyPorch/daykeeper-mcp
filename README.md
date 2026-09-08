@@ -1,7 +1,8 @@
 # Daykeeper MCP
 
 A local Model Context Protocol adapter for the Daykeeper management API,
-published by SkyPorch as `@skyporch/daykeeper-mcp`. It supports a
+distributed by SkyPorch as `@skyporch/daykeeper-mcp` after its owner-approved
+release. It supports a
 separately issued scoped API key for headless local use and exports a secured,
 fetch-native Streamable HTTP mounting primitive. It does not deploy a hosted
 endpoint, run an authorization server or issue credentials.
@@ -17,7 +18,8 @@ pnpm check
 pnpm check:cold
 ```
 
-Configure your MCP host to run `npx --yes @skyporch/daykeeper-mcp`
+Once the package is available from npm, configure your MCP host to run
+`npx --yes @skyporch/daykeeper-mcp`
 with these variables supplied through the host's protected environment or
 secret manager. Never put a real token in arguments, prompts or a checked-in
 configuration file.

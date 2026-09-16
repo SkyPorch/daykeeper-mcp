@@ -64,8 +64,8 @@
   "homepage": "https://github.com/SkyPorch/daykeeper-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "@skyporch/daykeeper": "0.2.0",
-    "zod": "4.4.3"
+    "@skyporch/daykeeper": "0.3.0",
+    "zod": "4.6.4"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",

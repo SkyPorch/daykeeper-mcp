@@ -1,5 +1,7 @@
 # Daykeeper MCP
 
+For more about Daykeeper, visit [mydaykeeper.com](https://www.mydaykeeper.com).
+
 A local Model Context Protocol adapter for the Daykeeper management API,
 distributed by SkyPorch as `@skyporch/daykeeper-mcp` after its owner-approved
 release. It supports a

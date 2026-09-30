@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Add official MCP Registry metadata for the local stdio package (`mcpName` and `server.json`).
+- No runtime behavior changes.
+
 ## 0.2.0
 
 ### Breaking

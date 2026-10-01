@@ -63,9 +63,9 @@
   },
   "homepage": "https://www.mydaykeeper.com",
   "dependencies": {
-    "@modelcontextprotocol/server": "2.0.0",
-    "@skyporch/daykeeper": "0.2.0",
-    "zod": "4.4.3"
+    "@modelcontextprotocol/server": "2.1.0",
+    "@skyporch/daykeeper": "0.4.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.1.0",

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.SkyPorch/daykeeper-mcp",
+  "title": "Daykeeper MCP",
+  "description": "A local stdio MCP adapter for the Daykeeper management API.",
+  "repository": {
+    "url": "https://github.com/SkyPorch/daykeeper-mcp",
+    "source": "github"
+  },
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@skyporch/daykeeper-mcp",
+      "version": "0.2.1",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DAYKEEPER_API_URL",
+          "description": "Daykeeper management API base URL; use HTTPS in production.",
+          "isRequired": true
+        },
+        {
+          "name": "DAYKEEPER_API_KEY",
+          "description": "Scoped headless credential. Set this or DAYKEEPER_ACCESS_TOKEN, but not both.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DAYKEEPER_ACCESS_TOKEN",
+          "description": "Short-lived OAuth access token. Set this or DAYKEEPER_API_KEY, but not both.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

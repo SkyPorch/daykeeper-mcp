@@ -1,7 +1,7 @@
 import { McpAdapterError } from "./errors.ts";
 
 export const MCP_VERSION = "0.2.0";
-export const SDK_VERSION = "0.2.0";
+export const SDK_VERSION = "0.3.0";
 export const ENVELOPE_VERSION = "1.0";
 export const MAX_RESPONSE_BYTES = 1_048_576;
 export const MAX_INPUT_BYTES = 524_288;
@@ -18,6 +18,11 @@ interface DaykeeperMcpBaseOptions {
   enableInboxTools?: boolean;
   /** SDK-gated inbox activation inspection and mutations. */
   enableActivationTools?: boolean;
+  /**
+   * SDK-gated workspace claims: hand an agent-created workspace to a person.
+   * Off by default; the create and revoke tools also need enableMutations.
+   */
+  enableClaimTools?: boolean;
   /** Explicit opt-in for tenant conversation reads. */
   enableOperatorTools?: boolean;
   /** Separate explicit approval for outgoing operator replies. */
@@ -60,6 +65,7 @@ export interface DaykeeperMcpConfig {
   readonly enableFlowWrites: boolean;
   readonly enableInboxTools: boolean;
   readonly enableActivationTools: boolean;
+  readonly enableClaimTools: boolean;
   readonly enableOperatorTools: boolean;
   readonly enableOperatorWrites: boolean;
   /** Undefined when the operator declared no scope list. */
@@ -108,6 +114,7 @@ export function validateOptions(
       options.enableFlowWrites,
       options.enableInboxTools,
       options.enableActivationTools,
+      options.enableClaimTools,
       options.enableOperatorTools,
       options.enableOperatorWrites,
     ]) {
@@ -125,6 +132,7 @@ export function validateOptions(
       enableFlowWrites: options.enableFlowWrites ?? false,
       enableInboxTools: options.enableInboxTools ?? false,
       enableActivationTools: options.enableActivationTools ?? false,
+      enableClaimTools: options.enableClaimTools ?? false,
       enableOperatorTools: options.enableOperatorTools ?? false,
       enableOperatorWrites: options.enableOperatorWrites ?? false,
       scopes,
@@ -164,6 +172,7 @@ export function readEnvironment(
     enableFlowWrites: flag("DAYKEEPER_MCP_ENABLE_FLOW_WRITES"),
     enableInboxTools: flag("DAYKEEPER_MCP_ENABLE_INBOX_TOOLS"),
     enableActivationTools: flag("DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS"),
+    enableClaimTools: flag("DAYKEEPER_MCP_ENABLE_CLAIM_TOOLS"),
     enableOperatorTools: flag("DAYKEEPER_MCP_ENABLE_OPERATOR_TOOLS"),
     enableOperatorWrites: flag("DAYKEEPER_MCP_ENABLE_OPERATOR_WRITES"),
     ...(scopes === undefined ? {} : { scopes }),
@@ -180,6 +189,7 @@ export function readEnvironment(
     enableFlowWrites: config.enableFlowWrites,
     enableInboxTools: config.enableInboxTools,
     enableActivationTools: config.enableActivationTools,
+    enableClaimTools: config.enableClaimTools,
     enableOperatorTools: config.enableOperatorTools,
     enableOperatorWrites: config.enableOperatorWrites,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),

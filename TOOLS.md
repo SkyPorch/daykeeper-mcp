@@ -32,6 +32,9 @@ versions are positive integers. Unknown fields are rejected before dispatch.
 | `daykeeper_inbox_activations_create` | Activate     | `daykeeper.accounts:write`     |
 | `daykeeper_inbox_activations_get`    | Read         | `daykeeper.accounts:read`      |
 | `daykeeper_inbox_activations_revoke` | Revoke       | `daykeeper.accounts:write`     |
+| `daykeeper_workspace_claims_create`  | Hand over    | `daykeeper.accounts:write`     |
+| `daykeeper_workspace_claims_list`    | Read         | `daykeeper.accounts:read`      |
+| `daykeeper_workspace_claims_revoke`  | Revoke       | `daykeeper.accounts:write`     |
 
 The first eight are enabled by default. Planning and mutation gates are
 independent; enabling mutation tools does not enable plan creation. The three
@@ -58,6 +61,20 @@ scope. Create takes `{tenantId, idempotencyKey}`; get/revoke take `{tenantId, in
 The key/intent is 16–128 characters from `[A-Za-z0-9._:-]`. Create is explicit:
 neither planning nor inspecting an inbox activates it. Only public receipt fields
 are returned; installation bindings and role identifiers are not exposed.
+
+Workspace claim tools hand a workspace an agent created (with `daykeeper init`)
+to the person it works for. They require the independent
+`DAYKEEPER_MCP_ENABLE_CLAIM_TOOLS=true` flag and SDK 0.3.0 (`workspaceClaims`);
+create and revoke also need the mutation flag. The API accepts them only under
+the machine credential `init` stored (`dk_machine_…`), so they work with the
+`mcp.json` `init` writes and not with a console-issued agent key. Create takes
+`{email, idempotencyKey}` (the address is trimmed and lowercased) and returns
+the claim, the one-time `claimUrl`, `replayed`, `emailed` and a `message` to
+relay to the person: who the link is for and that it expires in 72 hours. The
+invitation token itself is never returned. A replay returns no link; revoke and
+create with a new key to send a new one. List returns claims without links;
+revoke takes `{claimId}`. Issue a claim only for an address the person gave you:
+the link makes that address an owner.
 The API requires machine-owner authentication and performs all tenant checks.
 An `active` receipt is retained state, not a live-traffic attestation. Inspect
 the inbox for current traffic readiness; reconcile an uncertain write by reading

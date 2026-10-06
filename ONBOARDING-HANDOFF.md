@@ -15,7 +15,7 @@ Aggregate branch `codex/daykeeper-mcp-release-aggregate` is based on current
 - Local metadata reports the new gates. Default eight reads remain unchanged;
   the three new tools are hidden and inaccessible until explicitly enabled.
 - CI pins Node SDK source commit
-  `1eff7fbe9d63b3b4a89a0178ca1a7afe5b4ae914`, packs it and runs the entire MCP
+  `53bbbbb668a5953946af1fdb93103bb534038c11`, packs it and runs the entire MCP
   test suite in an isolated consumer with zero skips. The five flow, five inbox,
   and four activation candidate dispatch cases are mandatory. Release dependency
   and lock are now 0.2.0.

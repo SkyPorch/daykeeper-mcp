@@ -16,6 +16,7 @@ import type { DaykeeperMcpConfig } from "./config.ts";
 import { McpAdapterError } from "./errors.ts";
 import { assertInboxSdk, inboxSdk } from "./sdkInbox.ts";
 import { activationSdk, assertActivationSdk } from "./sdkActivation.ts";
+import { assertClaimSdk, claimSdk } from "./sdkClaims.ts";
 import { operatorSdk, assertOperatorSdk } from "./sdkOperator.ts";
 import {
   assertFlowWriteSdk,
@@ -39,6 +40,7 @@ export interface ToolMetadata {
   requiresFlowWrites: boolean;
   requiresInboxTools?: boolean;
   requiresActivationTools?: boolean;
+  requiresClaimTools?: boolean;
   requiresOperatorTools?: boolean;
   requiresOperatorWrites?: boolean;
 }
@@ -225,6 +227,28 @@ const activationCreate = z.strictObject({
   tenantId: resourceId,
   idempotencyKey,
 });
+// The platform accepts exactly the lowercased address (it rejects rather than
+// folds), so the adapter folds and trims before sending, as the CLI does.
+const claimEmail = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(
+    z
+      .string()
+      .min(3)
+      .max(254)
+      .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
+  )
+  .describe(
+    "The work email of the person who should own this workspace, exactly as they gave it to you. They must sign in with this address to claim it.",
+  );
+const claimCreate = z.strictObject({ email: claimEmail, idempotencyKey });
+const claimRevoke = z.strictObject({ claimId: resourceId });
+const claimTool = (metadata: ToolMetadata): ToolMetadata => ({
+  ...metadata,
+  requiresClaimTools: true,
+});
 const operatorConversation = z.strictObject({
   tenantId: resourceId,
   conversationId: integer,
@@ -245,6 +269,59 @@ const activationTool = (metadata: ToolMetadata): ToolMetadata => ({
 });
 
 const definitions: readonly ToolDefinition[] = [
+  define(
+    claimTool({
+      ...change(
+        "daykeeper_workspace_claims_create",
+        "Give a person owner access to the workspace this agent created: returns a one-time link to send them and a message to relay. Use only an address the person gave you for this. Requires an explicit idempotency key; reuse it to retry, and call daykeeper_workspace_claims_list after an uncertain result. A replay returns the claim without its link; revoke it and create with a new key to send a new link.",
+        "mutation",
+        ["daykeeper.accounts:write"],
+        true,
+        false,
+      ),
+    }),
+    claimCreate,
+    async (client, input, signal) =>
+      projectClaimCreate(
+        await claimSdk(client).workspaceClaims.create(
+          { email: input.email },
+          { idempotencyKey: input.idempotencyKey, signal },
+        ),
+        input.email,
+      ),
+  ),
+  define(
+    claimTool(
+      read(
+        "daykeeper_workspace_claims_list",
+        "List the owner claims this agent issued for its workspace (pending, accepted, revoked; expired ones are hidden). Never returns a link.",
+        ["daykeeper.accounts:read"],
+      ),
+    ),
+    empty,
+    async (client, _input, signal) =>
+      projectClaimList(await claimSdk(client).workspaceClaims.list({ signal })),
+  ),
+  define(
+    claimTool({
+      ...change(
+        "daykeeper_workspace_claims_revoke",
+        "Revoke one pending owner claim so its link stops working. Repeating it is harmless.",
+        "mutation",
+        ["daykeeper.accounts:write"],
+        true,
+        true,
+      ),
+      requiresIdempotencyKey: false,
+    }),
+    claimRevoke,
+    async (client, input, signal) =>
+      projectClaim(
+        await claimSdk(client).workspaceClaims.revoke(input.claimId, {
+          signal,
+        }),
+      ),
+  ),
   define(
     activationTool(
       read(
@@ -769,6 +846,115 @@ async function projectActivation(
   }
 }
 
+const CLAIM_FIELDS = [
+  "id",
+  "email",
+  "role",
+  "state",
+  "createdAt",
+  "expiresAt",
+  "acceptedAt",
+  "revokedAt",
+] as const;
+
+function projectClaim(value: unknown): Record<string, unknown> {
+  const parsed = z
+    .object({
+      id: resourceId,
+      email: z.string().min(3).max(254),
+      role: z.literal("owner"),
+      state: z.enum(["pending", "accepted", "revoked"]),
+      expiresAt: z.string().min(1).max(64),
+    })
+    .safeParse(value);
+  if (!parsed.success)
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected workspace claim.",
+    );
+  return pick(value as Record<string, unknown>, CLAIM_FIELDS);
+}
+
+function projectClaimList(value: unknown): Record<string, unknown> {
+  const items = (value as { items?: unknown })?.items;
+  if (!Array.isArray(items))
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected workspace claims.",
+    );
+  return { claims: items.map(projectClaim) };
+}
+
+/**
+ * The claim, the one-time link, and a plain message for the person. Only the
+ * console link the platform built is passed through: anything that is not an
+ * HTTPS URL carrying the token in its fragment is refused.
+ */
+function projectClaimCreate(
+  value: unknown,
+  email: string,
+): Record<string, unknown> {
+  const record = (value ?? {}) as Record<string, unknown>;
+  const claim = projectClaim(record.claim);
+  if (claim.email !== email)
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected workspace claim.",
+    );
+  const replayed = record.replayed === true;
+  const claimUrl = record.claimUrl;
+  if (
+    replayed
+      ? claimUrl !== null
+      : typeof claimUrl !== "string" ||
+        !/^https:\/\/[^\s#]+\/claim#token=dk_invite_[A-Za-z0-9_-]+$/.test(
+          claimUrl,
+        )
+  )
+    throw new McpAdapterError(
+      "INVALID_API_RESPONSE",
+      "The API did not return the expected workspace claim.",
+    );
+  const emailed = record.emailed === true;
+  const expires = describeClaimExpiry(String(claim.expiresAt));
+  const message = replayed
+    ? `A claim for ${email} is already waiting and expires ${expires}. Its link is only returned when it is issued. To send a new link, revoke this claim with daykeeper_workspace_claims_revoke, then create one with a new idempotency key.`
+    : [
+        emailed
+          ? `Daykeeper emailed this link to ${email}; you can also send it yourself.`
+          : `Send this link to ${email}.`,
+        `It works once, only for someone signed in as ${email}, and expires ${expires}.`,
+        "They sign in to Daykeeper with that address and become an owner of this workspace. This agent keeps working.",
+      ].join(" ");
+  return {
+    claim,
+    claimUrl: replayed ? null : claimUrl,
+    replayed,
+    emailed,
+    message,
+  };
+}
+
+/** "in 72 hours (on 9 October 2026 at 08:26 UTC)". */
+export function describeClaimExpiry(expiresAt: string, now = Date.now()) {
+  const at = new Date(expiresAt);
+  if (!Number.isFinite(at.getTime())) return "soon";
+  const hours = Math.max(0, Math.round((at.getTime() - now) / 3_600_000));
+  const day = at.toLocaleDateString("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const time = at.toLocaleTimeString("en-GB", {
+    timeZone: "UTC",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `in ${hours} hour${hours === 1 ? "" : "s"} (on ${day} at ${time} UTC)`;
+}
+
 // Identity only: no raw server body, provider detail or unknown field escapes.
 function pick(
   value: Readonly<Record<string, unknown>> | undefined,
@@ -789,6 +975,7 @@ export function toolEnabled(
   if (metadata.requiresInboxTools && !config.enableInboxTools) return false;
   if (metadata.requiresActivationTools && !config.enableActivationTools)
     return false;
+  if (metadata.requiresClaimTools && !config.enableClaimTools) return false;
   if (metadata.requiresOperatorTools && !config.enableOperatorTools)
     return false;
   if (metadata.requiresOperatorWrites && !config.enableOperatorWrites)
@@ -824,6 +1011,7 @@ export function registerTools(
     if (definition.metadata.requiresFlowWrites) assertFlowWriteSdk();
     if (definition.metadata.requiresInboxTools) assertInboxSdk();
     if (definition.metadata.requiresActivationTools) assertActivationSdk();
+    if (definition.metadata.requiresClaimTools) assertClaimSdk();
     if (definition.metadata.requiresOperatorTools) assertOperatorSdk();
     definition.register(server, execute, config);
   }

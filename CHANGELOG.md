@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Workspace claim tools behind `DAYKEEPER_MCP_ENABLE_CLAIM_TOOLS` (default
+  off): `daykeeper_workspace_claims_create` returns the one-time claim link and
+  a message to relay (who it is for, 72-hour expiry, whether Daykeeper emailed
+  it), `daykeeper_workspace_claims_list` and `daykeeper_workspace_claims_revoke`.
+  Create and revoke also need the mutation flag. The capabilities resource
+  reports `claimToolsEnabled`, `claimSdkSupported` and
+  `requiredClaimSdkVersion`.
+
+### Changed
+
+- `@skyporch/daykeeper` 0.3.0 (management contract `v1.3.0`, additive), which
+  adds `workspaceClaims`. No existing tool changes.
+
 ## 0.2.0
 
 ### Breaking

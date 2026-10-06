@@ -10,6 +10,7 @@ always be traced back to the contract it was built against.
 
 | daykeeper-mcp | Management contract | Contract tag | Contract commit                            | `@skyporch/daykeeper` |
 | ------------- | ------------------- | ------------ | ------------------------------------------ | --------------------- |
+| Unreleased    | 1.3.0               | `v1.3.0`     | `067465edfc6c94e63867a6dd0d9db02e12683877` | 0.3.0                 |
 | 0.2.0         | 1.1.0               | `v1.1.0`     | `d2a498187f49e63e687a2d93bd7becf1193bb1e9` | 0.2.0                 |
 
 ## Notes

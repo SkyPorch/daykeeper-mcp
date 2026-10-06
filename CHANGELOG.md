@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+### Contract
+
+- Consumes the Daykeeper MANAGEMENT contract 1.3.0 (tag `v1.3.0`, additive)
+  via `@skyporch/daykeeper` 0.3.0. See `COMPATIBILITY.md` for the contract tag
+  and commit.
 
 ### Added
 

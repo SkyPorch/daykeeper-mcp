@@ -122,7 +122,7 @@ an explicit idempotency key for apply. No tool invents a plan, confirmation,
 organization, role, scope or billing approval on behalf of the caller.
 
 Local flags and MCP annotations are safety hints, not authorization. Every tool
-uses the pinned `@skyporch/daykeeper@0.2.0` client against the configured API
+uses the pinned `@skyporch/daykeeper@0.3.0` client against the configured API
 which must enforce current principal status, scopes, tenant ownership and
 quotas. Do not share one adapter process/credential between untrusted principals.
 Returned customer names, descriptions and flow text are untrusted data, not

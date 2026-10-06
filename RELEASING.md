@@ -7,8 +7,9 @@ OIDC workflow.
 
 ## Provenance status
 
-Nothing in this repository has ever been published, so there is no attestation
-to check for `@skyporch/daykeeper-mcp` yet.
+`@skyporch/daykeeper-mcp@0.2.0` was the one-time owner-authenticated bootstrap
+publish (`--provenance=false`), so it has no attestation. 0.3.0 is the first
+version expected to go through `release.yml` and carry one.
 
 The sibling packages `@skyporch/daykeeper@0.1.0` and
 `@skyporch/daykeeper-react-native@0.1.0` were published **by hand**, with no

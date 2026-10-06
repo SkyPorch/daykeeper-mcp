@@ -51,8 +51,12 @@ for (const era of ["legacy", "modern"] as const) {
     assert.equal(metadata.credentialIssuance, false);
     assert.equal(metadata.credentialMode, "access_token");
     assert.equal(metadata.automaticRetries, false);
-    assert.equal(metadata.tools.length, 26);
+    // 26 + the three workspace claim tools, catalogued but off by default.
+    assert.equal(metadata.tools.length, 29);
     assert.equal(metadata.flowWritesEnabled, false);
+    assert.equal(metadata.claimToolsEnabled, false);
+    assert.equal(metadata.claimSdkSupported, true);
+    assert.equal(metadata.requiredClaimSdkVersion, "0.3.0");
     assert.equal(metadata.declaredScopes, null);
     assert.equal(
       metadata.tools.filter((tool: { enabled: boolean }) => tool.enabled)

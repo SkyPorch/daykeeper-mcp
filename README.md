@@ -26,18 +26,19 @@ with these variables supplied through the host's protected environment or
 secret manager. Never put a real token in arguments, prompts or a checked-in
 configuration file.
 
-| Variable                                | Behavior                                                                                                                                               |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `DAYKEEPER_API_URL`                     | Required management API base URL; HTTPS in production.                                                                                                 |
-| `DAYKEEPER_API_KEY`                     | Preferred static headless credential. Mutually exclusive with `DAYKEEPER_ACCESS_TOKEN`.                                                                |
-| `DAYKEEPER_ACCESS_TOKEN`                | Short-lived OAuth access token. Mutually exclusive with `DAYKEEPER_API_KEY`.                                                                           |
-| `DAYKEEPER_TIMEOUT_MS`                  | One request budget, 1,000–60,000 ms; default 30,000.                                                                                                   |
-| `DAYKEEPER_MCP_ENABLE_PLANNING`         | Exact `true` exposes two plan-creation tools; default `false`.                                                                                         |
-| `DAYKEEPER_MCP_ENABLE_MUTATIONS`        | Exact `true` exposes three provisioning tools; default `false`.                                                                                        |
-| `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS`      | Exact `true` enables SDK-gated inbox/provisioning reads; website planning also needs the planning flag. Default `false`.                               |
-| `DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS` | Exact `true` exposes activation inspection with a compatible SDK. Create/revoke also need mutations and declared account-write scope. Default `false`. |
-| `DAYKEEPER_MCP_ENABLE_OPERATOR_TOOLS`   | Exact `true` exposes tenant-scoped operator conversation reads with a compatible SDK. Default `false`.                                                 |
-| `DAYKEEPER_MCP_ENABLE_OPERATOR_WRITES`  | Exact `true` separately approves the outgoing reply tool; it also needs mutations and the declared conversation-write scope. Default `false`.          |
+| Variable                                | Behavior                                                                                                                                                                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DAYKEEPER_API_URL`                     | Required management API base URL; HTTPS in production.                                                                                                                                                                  |
+| `DAYKEEPER_API_KEY`                     | Preferred static headless credential. Mutually exclusive with `DAYKEEPER_ACCESS_TOKEN`.                                                                                                                                 |
+| `DAYKEEPER_ACCESS_TOKEN`                | Short-lived OAuth access token. Mutually exclusive with `DAYKEEPER_API_KEY`.                                                                                                                                            |
+| `DAYKEEPER_TIMEOUT_MS`                  | One request budget, 1,000–60,000 ms; default 30,000.                                                                                                                                                                    |
+| `DAYKEEPER_MCP_ENABLE_PLANNING`         | Exact `true` exposes two plan-creation tools; default `false`.                                                                                                                                                          |
+| `DAYKEEPER_MCP_ENABLE_MUTATIONS`        | Exact `true` exposes three provisioning tools; default `false`.                                                                                                                                                         |
+| `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS`      | Exact `true` enables SDK-gated inbox/provisioning reads; website planning also needs the planning flag. Default `false`.                                                                                                |
+| `DAYKEEPER_MCP_ENABLE_ACTIVATION_TOOLS` | Exact `true` exposes activation inspection with a compatible SDK. Create/revoke also need mutations and declared account-write scope. Default `false`.                                                                  |
+| `DAYKEEPER_MCP_ENABLE_CLAIM_TOOLS`      | Exact `true` exposes workspace claim tools (SDK 0.3.0): hand the workspace `init` created to its person. Create/revoke also need mutations; the API accepts only the machine credential `init` stored. Default `false`. |
+| `DAYKEEPER_MCP_ENABLE_OPERATOR_TOOLS`   | Exact `true` exposes tenant-scoped operator conversation reads with a compatible SDK. Default `false`.                                                                                                                  |
+| `DAYKEEPER_MCP_ENABLE_OPERATOR_WRITES`  | Exact `true` separately approves the outgoing reply tool; it also needs mutations and the declared conversation-write scope. Default `false`.                                                                           |
 
 The pinned management SDK supports HTTP only on `localhost` or `127.0.0.1` for
 local development. IPv6 HTTP is not supported by that SDK version. Base paths

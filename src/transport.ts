@@ -186,17 +186,19 @@ export function createExecutor(
             ...details.nextActions,
             ...(metadata.requiresActivationTools
               ? ["inspect_activation_with_original_intent"]
-              : metadata.name.endsWith("_apply")
-                ? [
-                    "inspect_operation_before_retry",
-                    "reuse_original_idempotency_key",
-                  ]
-                : metadata.requiresIdempotencyKey
+              : metadata.requiresClaimTools
+                ? ["list_workspace_claims", "reuse_original_idempotency_key"]
+                : metadata.name.endsWith("_apply")
                   ? [
-                      "inspect_resource_before_retry",
+                      "inspect_operation_before_retry",
                       "reuse_original_idempotency_key",
                     ]
-                  : ["inspect_resource_before_retry"]),
+                  : metadata.requiresIdempotencyKey
+                    ? [
+                        "inspect_resource_before_retry",
+                        "reuse_original_idempotency_key",
+                      ]
+                    : ["inspect_resource_before_retry"]),
           ]),
         ];
       }

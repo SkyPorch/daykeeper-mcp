@@ -202,7 +202,7 @@ This proves injected-transport compatibility, not live flow execution.
 
 The `@skyporch/daykeeper@0.2.0` dependency adds generic inbox, website inbox and
 tenant provisioning and activation methods. CI pins the reviewed source commit
-`1eff7fbe9d63b3b4a89a0178ca1a7afe5b4ae914` and packs it separately.
+`53bbbbb668a5953946af1fdb93103bb534038c11` and packs it separately.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.
 
@@ -254,7 +254,7 @@ runtime for the platform's isolated connected journey:
 
 ```sh
 node scripts/prepare-connected-mcp.mjs \
-  /absolute/skyporch-daykeeper-0.2.0.tgz \
+  /absolute/skyporch-daykeeper-0.3.0.tgz \
   /absolute/fresh-mcp-runtime
 ```
 

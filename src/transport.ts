@@ -1,4 +1,8 @@
-import { DaykeeperClient } from "@skyporch/daykeeper";
+import {
+  DaykeeperApiError,
+  DaykeeperClient,
+  DaykeeperTransportError,
+} from "@skyporch/daykeeper";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import {
   ENVELOPE_VERSION,
@@ -118,10 +122,26 @@ export function createExecutor(
                 );
           // A static credential and a dispatch guard avoid any late request after
           // the caller has cancelled. The SDK cannot redirect or replay a write.
+          // Pass-through only: the end client's address chain, so per-client
+          // API rate limits see the person rather than this host. Sent only to
+          // an explicitly allowlisted internal API host.
+          const outgoing = new Headers(init?.headers);
+          outgoing.delete("x-forwarded-for");
+          const dispatchHost = new URL(
+            typeof destination === "string" || destination instanceof URL
+              ? destination
+              : destination.url,
+          ).hostname;
+          if (
+            config.forwardedFor !== undefined &&
+            config.internalHttpHostnames.includes(dispatchHost)
+          )
+            outgoing.set("x-forwarded-for", config.forwardedFor);
           requestSent = true;
           const pending = Promise.resolve(
             transport(destination, {
               ...init,
+              headers: outgoing,
               signal: controller.signal,
               redirect: "error",
               credentials: "omit",
@@ -213,7 +233,12 @@ export function createExecutor(
             "INTERNAL_ERROR",
           ].includes(details.code) ||
           details.status === 408 ||
-          (details.status ?? 0) >= 500)
+          (details.status ?? 0) >= 500 ||
+          // The API itself may say a dispatched write's outcome is unknown,
+          // for example 409 REQUEST_OUTCOME_UNKNOWN on an idempotent replay.
+          ((error instanceof DaykeeperApiError ||
+            error instanceof DaykeeperTransportError) &&
+            error.outcomeUnknown))
       ) {
         details.mutationOutcome = "unknown";
         details.nextActions = [
@@ -245,12 +270,28 @@ export function createExecutor(
             "use_a_fresh_key_only_for_a_different_request",
           ]),
         ];
-      if (metadata.profile === "dashboard")
-        return dashboardError(metadata, config.accessToken, details, input);
-      return result(metadata, config.accessToken, {
-        ok: false,
-        error: details,
-      });
+      const failure =
+        metadata.profile === "dashboard"
+          ? dashboardError(metadata, config.accessToken, details, input)
+          : result(metadata, config.accessToken, {
+              ok: false,
+              error: details,
+            });
+      // The API refused the bearer itself (revoked, expired or disconnected
+      // mid-session): carry the RFC 6750 challenge ChatGPT turns into a
+      // "reconnect" prompt. Only for a real API 401, never a local refusal.
+      if (
+        details.kind === "api" &&
+        details.status === 401 &&
+        config.resourceMetadataUrl !== undefined
+      )
+        failure._meta = {
+          ...failure._meta,
+          "mcp/www_authenticate": [
+            `Bearer resource_metadata="${config.resourceMetadataUrl}", error="invalid_token", error_description="Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."`,
+          ],
+        };
+      return failure;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", cancel);
@@ -356,13 +397,22 @@ function dashboardError(
     /^[A-Za-z0-9._:-]{16,128}$/.test(input.idempotencyKey)
       ? input.idempotencyKey
       : undefined;
+  const what = metadata.name === "send_reply" ? "reply" : "change";
+  const message =
+    details.code === "REQUEST_IN_PROGRESS" && key
+      ? `This ${what} is still being processed under idempotencyKey "${key}". Wait, check the current state, and retry only with that same key.`
+      : details.code === "IDEMPOTENCY_KEY_REUSED"
+        ? `idempotencyKey${key ? ` "${key}"` : ""} was already used for a different ${what}. Check the current state; use a new key only for a genuinely different ${what}.`
+        : unknown
+          ? key
+            ? `The ${metadata.name === "send_reply" ? "reply may already have been sent" : "change may already have been made"}. Check the current state before trying again. To retry, repeat the call with idempotencyKey "${key}"; never with a new key.`
+            : "The change may already have been made. Check the current state before trying again."
+          : details.status === 401
+            ? "Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."
+            : details.message;
   const error = {
     code: details.code,
-    message: unknown
-      ? key
-        ? `The ${metadata.name === "send_reply" ? "reply may already have been sent" : "change may already have been made"}. Check the current state before trying again. To retry, repeat the call with idempotencyKey "${key}"; never with a new key.`
-        : "The change may already have been made. Check the current state before trying again."
-      : details.message,
+    message,
     retryable: unknown ? false : details.retryable,
     ...(details.status === undefined ? {} : { status: details.status }),
     ...(unknown ? { outcome: "unknown" as const } : {}),

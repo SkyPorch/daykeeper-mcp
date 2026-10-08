@@ -7,6 +7,7 @@ export interface RecordedCall {
   url: URL;
   authorization: string | null;
   idempotencyKey: string | null;
+  forwardedFor: string | null;
   body: unknown;
 }
 
@@ -69,6 +70,8 @@ const ok = (data: unknown, status = 200) => Response.json({ data }, { status });
  */
 export function fakeDaykeeperApi(options: FakeApiOptions = {}) {
   const calls: RecordedCall[] = [];
+  // Durable reply results by Idempotency-Key, as the API stores them.
+  const replies = new Map<string, unknown>();
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -78,6 +81,7 @@ export function fakeDaykeeperApi(options: FakeApiOptions = {}) {
       url,
       authorization: request.headers.get("authorization"),
       idempotencyKey: request.headers.get("idempotency-key"),
+      forwardedFor: request.headers.get("x-forwarded-for"),
       body: text ? JSON.parse(text) : undefined,
     };
     calls.push(call);
@@ -148,12 +152,25 @@ export function fakeDaykeeperApi(options: FakeApiOptions = {}) {
         createdAt: "2026-09-01T00:00:00.000Z",
         updatedAt: "2026-09-01T00:00:00.000Z",
       });
-    if (tenant && path === `/v1/tenants/${tenant}/conversations`)
+    if (tenant && path === `/v1/tenants/${tenant}/conversations`) {
+      // ?status=open|resolved|pending|snoozed|all, default open; a cursor is
+      // bound to the status it was issued for.
+      const status = url.searchParams.get("status") ?? "open";
+      if (!["open", "resolved", "pending", "snoozed", "all"].includes(status))
+        return apiError(400, "VALIDATION_FAILED");
+      const cursor = url.searchParams.get("cursor");
+      if (cursor !== null && cursor !== `c2.${status}`)
+        return apiError(400, "INVALID_CURSOR");
+      const itemStatus = status === "all" ? "open" : status;
       return ok({
         tenantId: tenant,
-        conversations: [conversationItem(41), conversationItem(40)],
-        nextCursor: url.searchParams.get("cursor") ? null : "c2",
+        conversations: [
+          conversationItem(41, itemStatus),
+          conversationItem(40, itemStatus),
+        ],
+        nextCursor: cursor ? null : `c2.${status}`,
       });
+    }
     const thread =
       /^\/v1\/tenants\/[0-9a-f-]{36}\/conversations\/(\d+)\/(messages|status)$/.exec(
         path,
@@ -165,23 +182,32 @@ export function fakeDaykeeperApi(options: FakeApiOptions = {}) {
         messages: [messageItem(1, Number(thread[1]))],
         nextCursor: null,
       });
-    if (thread && thread[2] === "messages" && request.method === "POST")
-      return ok(
-        {
-          tenantId: tenant,
-          conversationId: Number(thread[1]),
-          message: {
-            ...messageItem(
-              2,
-              Number(thread[1]),
-              (call.body as { content: string }).content,
-            ),
-            senderType: "user",
-            messageType: 1,
+    if (thread && thread[2] === "messages" && request.method === "POST") {
+      const key = call.idempotencyKey ?? "";
+      if (replies.has(key))
+        return new Response(JSON.stringify({ data: replies.get(key) }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "idempotent-replayed": "true",
           },
+        });
+      const stored = {
+        tenantId: tenant,
+        conversationId: Number(thread[1]),
+        message: {
+          ...messageItem(
+            2,
+            Number(thread[1]),
+            (call.body as { content: string }).content,
+          ),
+          senderType: "user",
+          messageType: 1,
         },
-        201,
-      );
+      };
+      replies.set(key, stored);
+      return ok(stored, 201);
+    }
     if (thread && thread[2] === "status")
       return ok({
         tenantId: tenant,
@@ -208,7 +234,12 @@ export function fakeDaykeeperApi(options: FakeApiOptions = {}) {
   return { fetch, calls };
 }
 
-export function apiError(status: number, code: string, retryable = false) {
+export function apiError(
+  status: number,
+  code: string,
+  retryable = false,
+  extra: Record<string, unknown> = {},
+) {
   return Response.json(
     {
       error: {
@@ -217,6 +248,7 @@ export function apiError(status: number, code: string, retryable = false) {
         retryable,
         nextActions: [],
         correlationId: "corr-1",
+        ...extra,
       },
     },
     { status },

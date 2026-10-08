@@ -39,7 +39,8 @@ export interface DaykeeperMcpHostedConfig {
   readonly internalHostnames: readonly string[];
   readonly introspectionSecret: string;
   readonly issuer: string;
-  readonly widgetDomain: string | undefined;
+  /** `_meta.ui.domain`: required by OpenAI to submit a plugin with UI. */
+  readonly widgetDomain: string;
 }
 
 export interface DaykeeperMcpHttpServerHandle {
@@ -94,7 +95,11 @@ export function readHostedEnvironment(
   const resourceUrl = url("DAYKEEPER_MCP_RESOURCE_URL");
   const issuer = required("DAYKEEPER_OAUTH_ISSUER");
   if (!/^https:\/\/[^/?#\s]+$/.test(issuer)) fail("DAYKEEPER_OAUTH_ISSUER");
-  const widgetDomain = environment.DAYKEEPER_MCP_WIDGET_DOMAIN;
+  // OpenAI requires a dedicated, per-plugin widget origin to submit a plugin
+  // with UI, so the hosted entrypoint refuses to start without one.
+  const widgetDomain = required("DAYKEEPER_MCP_WIDGET_DOMAIN");
+  if (!/^https:\/\/[a-z0-9.-]+$/.test(widgetDomain))
+    fail("DAYKEEPER_MCP_WIDGET_DOMAIN");
   return Object.freeze({
     port,
     host: environment.DAYKEEPER_MCP_HTTP_HOST ?? "0.0.0.0",
@@ -113,7 +118,7 @@ export function readHostedEnvironment(
     ),
     introspectionSecret: required("DAYKEEPER_OAUTH_INTROSPECTION_SECRET"),
     issuer,
-    widgetDomain: widgetDomain === "" ? undefined : widgetDomain,
+    widgetDomain,
   });
 }
 
@@ -152,7 +157,7 @@ export async function startDaykeeperMcpHttpServer(
     passthrough: {
       toolProfile: "dashboard",
       internalHttpHostnames: config.internalHostnames,
-      ...(config.widgetDomain ? { widgetDomain: config.widgetDomain } : {}),
+      widgetDomain: config.widgetDomain,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     },
     verifier,

@@ -11,7 +11,8 @@ import {
   type DaykeeperMcpHttpPassthroughOptions,
   type DaykeeperMcpVerifiedAuthInfo,
 } from "../src/index.ts";
-import { fakeDaykeeperApi } from "./dashboardFake.ts";
+import { normalizeForwardedFor } from "../src/config.ts";
+import { apiError, fakeDaykeeperApi } from "./dashboardFake.ts";
 
 const RESOURCE = new URL("https://api.mydaykeeper.com/mcp");
 const ISSUER = "https://api.mydaykeeper.com";
@@ -83,7 +84,11 @@ function post(token?: string): Request {
   });
 }
 
-async function connect(context: TestContext, options: DaykeeperMcpHttpOptions) {
+async function connect(
+  context: TestContext,
+  options: DaykeeperMcpHttpOptions,
+  forwardedFor?: string,
+) {
   const handler = createDaykeeperMcpHttpHandler(options);
   const transport = new StreamableHTTPClientTransport(RESOURCE, {
     authProvider: { token: async () => BEARER },
@@ -91,6 +96,8 @@ async function connect(context: TestContext, options: DaykeeperMcpHttpOptions) {
       const incoming = new Request(input, init);
       const headers = new Headers(incoming.headers);
       headers.set("host", RESOURCE.hostname);
+      if (forwardedFor !== undefined)
+        headers.set("x-forwarded-for", forwardedFor);
       return handler.fetch(new Request(incoming, { headers }));
     },
   });
@@ -411,4 +418,138 @@ test("a verifier outage is a 503, not a re-authorization challenge", async () =>
   );
   await handler.close();
   await invalid.close();
+});
+
+test("forwarded-for chains are strictly bare IP literals, at most 8 and 512 characters", () => {
+  assert.equal(normalizeForwardedFor("203.0.113.7"), "203.0.113.7");
+  assert.equal(
+    normalizeForwardedFor("203.0.113.7,  10.0.0.2 ,2001:db8::1"),
+    "203.0.113.7, 10.0.0.2, 2001:db8::1",
+  );
+  assert.equal(
+    normalizeForwardedFor(
+      Array.from({ length: 8 }, () => "10.0.0.1").join(","),
+    ),
+    Array.from({ length: 8 }, () => "10.0.0.1").join(", "),
+  );
+  for (const value of [
+    undefined,
+    null,
+    "",
+    " ",
+    "unknown",
+    "203.0.113.7:443",
+    "[2001:db8::1]",
+    "fe80::1%eth0",
+    "203.0.113.7,,10.0.0.1",
+    "203.0.113.7, evil.example.test",
+    "203.0.113.7\r\nx-injected: 1",
+    "256.0.0.1",
+    Array.from({ length: 9 }, () => "10.0.0.1").join(","),
+    Array.from(
+      { length: 8 },
+      () => "2001:0db8:0000:0000:0000:ff00:0042:8329",
+    ).join(",") + "x".repeat(200),
+    "1".repeat(513),
+  ])
+    assert.equal(normalizeForwardedFor(value), undefined, String(value));
+});
+
+test("pass-through forwards the proxy's X-Forwarded-For to SDK and dashboard API calls", async (context) => {
+  const api = fakeDaykeeperApi();
+  const client = await connect(
+    context,
+    passthrough({}, api.fetch),
+    "203.0.113.7, 10.0.0.5",
+  );
+  // tenants.list goes through the SDK; /v1/me through the dashboard client.
+  await client.callTool({ name: "list_workspaces", arguments: {} });
+  await client.callTool({ name: "get_profile", arguments: {} });
+  await client.callTool({ name: "get_dashboard", arguments: {} });
+  assert(api.calls.length >= 6);
+  for (const call of api.calls)
+    assert.equal(call.forwardedFor, "203.0.113.7, 10.0.0.5", call.url.pathname);
+});
+
+test("a malformed X-Forwarded-For is dropped, not forwarded", async (context) => {
+  for (const forwarded of [
+    "203.0.113.7, not-an-ip",
+    Array.from({ length: 9 }, () => "10.0.0.1").join(","),
+    "203.0.113.7:8443",
+  ]) {
+    const api = fakeDaykeeperApi();
+    const client = await connect(
+      context,
+      passthrough({}, api.fetch),
+      forwarded,
+    );
+    await client.callTool({ name: "list_workspaces", arguments: {} });
+    await client.callTool({ name: "get_profile", arguments: {} });
+    assert.equal(api.calls.length, 2);
+    for (const call of api.calls) assert.equal(call.forwardedFor, null);
+  }
+});
+
+test("X-Forwarded-For is never forwarded in exchange mode or to a non-allowlisted API host", async (context) => {
+  // Exchange mode: neither the incoming header nor a resolver-supplied value.
+  const exchangeApi = fakeDaykeeperApi();
+  const exchange = await connect(
+    context,
+    {
+      resourceServerUrl: RESOURCE,
+      daykeeperApiUrl: new URL("https://api.example.test"),
+      authorizationServerIssuer: ISSUER,
+      serveAuthorizationServerMetadata: false,
+      verifier: { verifyAccessToken: async (token) => auth(token) },
+      resolvePrincipal: async () => ({
+        principalId: "user-1",
+        grantId: "conn-1",
+        downstreamExpiresAt: Math.floor(Date.now() / 1_000) + 60,
+        daykeeper: {
+          baseUrl: "https://api.example.test",
+          accessToken: "dk_downstream_exchange_credential_0001",
+          scopes: ["daykeeper.accounts:read"],
+          forwardedFor: "198.51.100.9",
+          internalHttpHostnames: ["api.example.test"],
+          fetch: exchangeApi.fetch,
+        },
+      }),
+      allowedHostnames: [RESOURCE.hostname],
+    },
+    "203.0.113.7",
+  );
+  await exchange.callTool({ name: "daykeeper_tenants_list", arguments: {} });
+  assert.equal(exchangeApi.calls.length, 1);
+  assert.equal(exchangeApi.calls[0]!.forwardedFor, null);
+
+  // Pass-through to an HTTPS API host that is not on the internal allowlist.
+  const publicApi = fakeDaykeeperApi();
+  const outside = await connect(
+    context,
+    passthrough(
+      { daykeeperApiUrl: new URL("https://api.example.test") },
+      publicApi.fetch,
+    ),
+    "203.0.113.7",
+  );
+  await outside.callTool({ name: "list_workspaces", arguments: {} });
+  await outside.callTool({ name: "get_profile", arguments: {} });
+  assert.equal(publicApi.calls.length, 2);
+  for (const call of publicApi.calls) assert.equal(call.forwardedFor, null);
+});
+
+test("a token revoked mid-session yields the reconnect challenge on the tool result", async (context) => {
+  const api = fakeDaykeeperApi({
+    override: () => apiError(401, "UNAUTHENTICATED"),
+  });
+  const client = await connect(context, passthrough({}, api.fetch));
+  const result = await client.callTool({
+    name: "get_dashboard",
+    arguments: {},
+  });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result._meta?.["mcp/www_authenticate"], [
+    `Bearer resource_metadata="${PRM_URL}", error="invalid_token", error_description="Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."`,
+  ]);
+  assert(!JSON.stringify(result).includes(BEARER));
 });

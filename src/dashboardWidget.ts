@@ -296,7 +296,7 @@ const BODY = `
 <section id="panel-inbox">
 <div class="stats"><div class="stat"><b>Inbox status</b><span id="inbox-status">-</span></div><div class="stat"><b>Plan</b><span id="plan">-</span></div><div class="stat"><b>Usage</b><span id="usage-line">-</span></div></div>
 <div class="split" id="split">
-<div class="list"><div class="list-head"><select id="filter" aria-label="Status"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></div><ul class="items" id="items"></ul><div class="empty" id="list-empty">Loading</div><button class="more" id="more" type="button" hidden>More</button></div>
+<div class="list"><div class="list-head"><select id="filter" aria-label="Status"><option value="open">Open</option><option value="resolved">Resolved</option><option value="pending">Pending</option><option value="snoozed">Snoozed</option><option value="all">All</option></select></div><ul class="items" id="items"></ul><div class="empty" id="list-empty">Loading</div><button class="more" id="more" type="button" hidden>More</button></div>
 <div class="thread"><div class="empty" id="thread-empty">Select a conversation</div>
 <div id="thread-body" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">
 <div class="thread-head"><button class="back" id="back" type="button" aria-label="Back">Back</button><span class="title" id="thread-title"></span><button id="resolve" type="button">Resolve</button></div>

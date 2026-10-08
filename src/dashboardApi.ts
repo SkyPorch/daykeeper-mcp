@@ -40,7 +40,7 @@ export interface DashboardApi {
     content: string,
     idempotencyKey: string,
     signal?: AbortSignal,
-  ): Promise<unknown>;
+  ): Promise<ReplyResult>;
   setConversationStatus(
     tenantId: string,
     conversationId: number,
@@ -55,12 +55,29 @@ export interface DashboardApi {
   ): Promise<unknown>;
 }
 
+export const CONVERSATION_STATUS_FILTERS = [
+  "open",
+  "resolved",
+  "pending",
+  "snoozed",
+  "all",
+] as const;
+export type ConversationStatusFilter =
+  (typeof CONVERSATION_STATUS_FILTERS)[number];
+
+/** A reply plus whether the API answered with its stored original. */
+export interface ReplyResult {
+  readonly data: unknown;
+  /** True when the API sent `idempotent-replayed: true`. */
+  readonly replayed: boolean;
+}
+
 export interface PageQuery {
   cursor?: string;
   limit?: number;
 }
 export interface ConversationPageQuery extends PageQuery {
-  status?: "open" | "resolved" | "all";
+  status?: ConversationStatusFilter;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -75,6 +92,7 @@ interface RequestOptions {
   body?: unknown;
   idempotencyKey?: string;
   signal?: AbortSignal;
+  onHeaders?: (headers: Headers) => void;
 }
 
 export function createDashboardApi(options: {
@@ -182,8 +200,13 @@ export function createDashboardApi(options: {
           ? { correlationId: bounded(body.correlationId, 128) }
           : {}),
         fields: stringList(body.fields),
+        // The API may say so itself (409 REQUEST_OUTCOME_UNKNOWN); a 5xx or
+        // 408 after dispatch is unknown too.
         outcomeUnknown:
-          mutates && (response.status >= 500 || response.status === 408),
+          mutates &&
+          (body.outcomeUnknown === true ||
+            response.status >= 500 ||
+            response.status === 408),
       });
     }
     if (unreadable || !isRecord(payload) || !("data" in payload))
@@ -193,6 +216,7 @@ export function createDashboardApi(options: {
         retryable: !mutates,
         outcomeUnknown: mutates,
       });
+    if (request.onHeaders) request.onHeaders(response.headers);
     return payload.data;
   };
 
@@ -201,14 +225,16 @@ export function createDashboardApi(options: {
     listConversations: (tenantId, query, signal) => {
       if (
         query.status !== undefined &&
-        !["open", "resolved", "all"].includes(query.status)
+        !(CONVERSATION_STATUS_FILTERS as readonly string[]).includes(
+          query.status,
+        )
       )
         throw invalid("The conversation status filter is invalid");
       return request(`${tenantPath(tenantId)}/conversations`, {
         query: {
-          ...(query.status && query.status !== "all"
-            ? { status: query.status }
-            : {}),
+          // The cursor is bound to its status, so the filter is always sent,
+          // "all" included.
+          status: query.status ?? "open",
           ...page(query),
         },
         signal,
@@ -219,19 +245,35 @@ export function createDashboardApi(options: {
         query: page(query),
         signal,
       }),
-    reply: (tenantId, conversationId, content, idempotencyKey, signal) => {
+    reply: async (
+      tenantId,
+      conversationId,
+      content,
+      idempotencyKey,
+      signal,
+    ) => {
       if (
         typeof content !== "string" ||
         !content.trim() ||
         content.length > 4_000
       )
         throw invalid("Replies must contain 1 through 4000 characters");
-      return request(`${conversationPath(tenantId, conversationId)}/messages`, {
-        method: "POST",
-        body: { content: content.trim() },
-        idempotencyKey,
-        signal,
-      });
+      let replayed = false;
+      const data = await request(
+        `${conversationPath(tenantId, conversationId)}/messages`,
+        {
+          method: "POST",
+          body: { content: content.trim() },
+          idempotencyKey,
+          signal,
+          onHeaders: (headers) => {
+            replayed =
+              headers.get("idempotent-replayed")?.trim().toLowerCase() ===
+              "true";
+          },
+        },
+      );
+      return { data, replayed };
     },
     setConversationStatus: (tenantId, conversationId, status, signal) => {
       if (status !== "open" && status !== "resolved")

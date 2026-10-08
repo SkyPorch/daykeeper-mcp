@@ -116,18 +116,23 @@ endpoint behind `https://api.mydaykeeper.com/mcp`. Daykeeper's own OAuth server
 issues the bearer; this host verifies it by introspection on the private
 network and passes the same token through to the `/v1` API.
 
-| Variable                               | Default               |                                                  |
-| -------------------------------------- | --------------------- | ------------------------------------------------ |
-| `DAYKEEPER_MCP_RESOURCE_URL`           | required              | e.g. `https://api.mydaykeeper.com/mcp`           |
-| `DAYKEEPER_INTERNAL_API_URL`           | required              | e.g. `http://daykeeper-api:4100`                 |
-| `DAYKEEPER_OAUTH_ISSUER`               | required              | `https://api.mydaykeeper.com`, no trailing slash |
-| `DAYKEEPER_OAUTH_INTROSPECTION_SECRET` | required              | bearer for `POST /oauth/introspect`              |
-| `DAYKEEPER_MCP_HTTP_PORT`              | `4108`                |                                                  |
-| `DAYKEEPER_MCP_HTTP_HOST`              | `0.0.0.0`             |                                                  |
-| `DAYKEEPER_MCP_ALLOWED_HOSTNAMES`      | resource host         | comma list                                       |
-| `DAYKEEPER_MCP_ALLOWED_ORIGINS`        | `https://chatgpt.com` | comma list                                       |
-| `DAYKEEPER_MCP_INTERNAL_HOSTNAMES`     | `daykeeper-api`       | the only hosts reachable over plain HTTP         |
-| `DAYKEEPER_MCP_WIDGET_DOMAIN`          | unset                 | `_meta.ui.domain` for the dashboard UI           |
+| Variable                               | Default               |                                                                                                       |
+| -------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DAYKEEPER_MCP_RESOURCE_URL`           | required              | e.g. `https://api.mydaykeeper.com/mcp`                                                                |
+| `DAYKEEPER_INTERNAL_API_URL`           | required              | e.g. `http://daykeeper-api:4100`                                                                      |
+| `DAYKEEPER_OAUTH_ISSUER`               | required              | `https://api.mydaykeeper.com`, no trailing slash                                                      |
+| `DAYKEEPER_OAUTH_INTROSPECTION_SECRET` | required              | bearer for `POST /oauth/introspect`                                                                   |
+| `DAYKEEPER_MCP_HTTP_PORT`              | `4108`                |                                                                                                       |
+| `DAYKEEPER_MCP_HTTP_HOST`              | `0.0.0.0`             |                                                                                                       |
+| `DAYKEEPER_MCP_ALLOWED_HOSTNAMES`      | resource host         | comma list                                                                                            |
+| `DAYKEEPER_MCP_ALLOWED_ORIGINS`        | `https://chatgpt.com` | comma list                                                                                            |
+| `DAYKEEPER_MCP_INTERNAL_HOSTNAMES`     | `daykeeper-api`       | the only hosts reachable over plain HTTP                                                              |
+| `DAYKEEPER_MCP_WIDGET_DOMAIN`          | required              | `_meta.ui.domain`: a dedicated HTTPS origin for this plugin, e.g. `https://dashboard.mydaykeeper.com` |
+
+It forwards the proxy's `X-Forwarded-For` (bare IP literals only, at most 8)
+to the internal API so per-client rate limits apply; exchange mode never does.
+A tool whose API call returns 401 carries `_meta["mcp/www_authenticate"]` so
+ChatGPT asks the person to reconnect.
 
 It serves `/healthz`, the RFC 9728 metadata at
 `/.well-known/oauth-protected-resource/mcp` and `/mcp`. It does not serve the

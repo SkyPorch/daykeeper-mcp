@@ -23,6 +23,7 @@ const ENV = {
   DAYKEEPER_INTERNAL_API_URL: "http://daykeeper-api:4100",
   DAYKEEPER_OAUTH_INTROSPECTION_SECRET: SECRET,
   DAYKEEPER_OAUTH_ISSUER: "https://api.mydaykeeper.com",
+  DAYKEEPER_MCP_WIDGET_DOMAIN: "https://dashboard.mydaykeeper.com",
 };
 
 /** Introspection plus the `/v1` fake, all on the internal network. */
@@ -67,6 +68,8 @@ async function viaListener(address: string, input: Request): Promise<Response> {
     headers[name] = value;
   });
   headers.host = "api.mydaykeeper.com";
+  // As Caddy sets it in front of the MCP host.
+  headers["x-forwarded-for"] = "203.0.113.7";
   const body = input.body ? Buffer.from(await input.arrayBuffer()) : undefined;
   return new Promise((resolve, reject) => {
     const outgoing = httpRequest(
@@ -246,7 +249,20 @@ test("the official MCP client completes a session against the hosted server", as
   for (const call of api.calls) {
     assert.equal(call.url.origin, "http://daykeeper-api:4100");
     assert.equal(call.authorization, `Bearer ${BEARER}`);
+    assert.equal(call.forwardedFor, "203.0.113.7");
   }
+  const widget = await client.readResource({
+    uri: "ui://daykeeper/dashboard-v1.html",
+  });
+  const meta = widget.contents[0]!._meta as {
+    ui: { domain: string };
+    "openai/widgetDomain": string;
+  };
+  assert.equal(meta.ui.domain, "https://dashboard.mydaykeeper.com");
+  assert.equal(
+    meta["openai/widgetDomain"],
+    "https://dashboard.mydaykeeper.com",
+  );
   assert(api.calls.some((call) => call.url.pathname === "/v1/tenants"));
   // Positive introspection results are reused briefly, not per request.
   assert(introspections.length >= 1 && introspections.length < 4);
@@ -266,6 +282,7 @@ test("hosted configuration is explicit and refuses unsafe internal URLs", async 
     "DAYKEEPER_INTERNAL_API_URL",
     "DAYKEEPER_OAUTH_INTROSPECTION_SECRET",
     "DAYKEEPER_OAUTH_ISSUER",
+    "DAYKEEPER_MCP_WIDGET_DOMAIN",
   ])
     assert.throws(
       () => readHostedEnvironment({ ...ENV, [name]: undefined }),
@@ -276,6 +293,9 @@ test("hosted configuration is explicit and refuses unsafe internal URLs", async 
     { DAYKEEPER_MCP_HTTP_PORT: "08" },
     { DAYKEEPER_OAUTH_ISSUER: "https://api.mydaykeeper.com/" },
     { DAYKEEPER_MCP_ALLOWED_ORIGINS: " , " },
+    { DAYKEEPER_MCP_WIDGET_DOMAIN: "" },
+    { DAYKEEPER_MCP_WIDGET_DOMAIN: "https://dashboard.mydaykeeper.com/" },
+    { DAYKEEPER_MCP_WIDGET_DOMAIN: "dashboard.mydaykeeper.com" },
   ])
     assert.throws(() => readHostedEnvironment({ ...ENV, ...overrides }));
   // Plain HTTP only to the allowlisted internal service name.

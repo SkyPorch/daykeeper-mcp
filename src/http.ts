@@ -13,6 +13,7 @@ import {
   type ServerNotifier,
 } from "@modelcontextprotocol/server";
 import {
+  normalizeForwardedFor,
   normalizeInternalHostnames,
   SCOPE_PATTERN,
   validateOptions,
@@ -448,7 +449,13 @@ export function createDaykeeperMcpHttpHandler(
         (signal) =>
           resolvePrincipal
             ? resolvePrincipal(auth, { signal })
-            : passthroughPrincipal(auth, config),
+            : passthroughPrincipal(
+                auth,
+                config,
+                // Set by the trusted proxy in front of this host (Caddy).
+                // Strictly validated; dropped entirely when malformed.
+                normalizeForwardedFor(request.headers.get("x-forwarded-for")),
+              ),
         config.authenticationTimeoutMs,
         requestSignal,
       );
@@ -483,6 +490,7 @@ export function createDaykeeperMcpHttpHandler(
             resolutionOutcome.value,
             auth,
             config.daykeeperApiUrl,
+            config.resourceMetadataUrl,
           )
         : resolutionOutcome.value;
       releaseDownstreamBinding = bindDownstreamCredential(
@@ -986,6 +994,7 @@ function validatePassthrough(
 function passthroughPrincipal(
   auth: DaykeeperMcpVerifiedAuthInfo,
   config: ValidatedHttpOptions,
+  forwardedFor: string | undefined,
 ): DaykeeperMcpHttpPrincipal {
   const settings = config.passthrough;
   if (!settings) throw new Error("passthrough_not_enabled");
@@ -998,6 +1007,8 @@ function passthroughPrincipal(
     toolProfile: settings.toolProfile,
     internalHttpHostnames: settings.internalHttpHostnames,
     scopes,
+    resourceMetadataUrl: config.resourceMetadataUrl,
+    ...(forwardedFor === undefined ? {} : { forwardedFor }),
     ...(settings.timeoutMs === undefined
       ? {}
       : { timeoutMs: settings.timeoutMs }),
@@ -1018,6 +1029,10 @@ function passthroughPrincipal(
       toolProfile: settings.toolProfile,
       internalHttpHostnames: settings.internalHttpHostnames,
       scopes: Object.freeze([...(downstream.scopes ?? [])]),
+      resourceMetadataUrl: config.resourceMetadataUrl,
+      ...(downstream.forwardedFor
+        ? { forwardedFor: downstream.forwardedFor }
+        : {}),
       ...(downstream.dashboardWidgetDomain
         ? { dashboardWidgetDomain: downstream.dashboardWidgetDomain }
         : {}),
@@ -1055,6 +1070,7 @@ function validatePrincipal(
   principal: DaykeeperMcpHttpPrincipal,
   authInfo: DaykeeperMcpVerifiedAuthInfo,
   daykeeperApiUrl: URL,
+  resourceMetadataUrl: string,
 ): DaykeeperMcpHttpPrincipal {
   const principalId = boundedIdentifier(principal.principalId);
   const grantId = boundedIdentifier(principal.grantId);
@@ -1096,6 +1112,9 @@ function validatePrincipal(
       enableOperatorTools: downstream.enableOperatorTools,
       enableOperatorWrites: downstream.enableOperatorWrites,
       scopes: Object.freeze([...downstream.scopes]),
+      // Deliberately not copied: forwardedFor and internalHttpHostnames. The
+      // client address chain is a pass-through-only signal.
+      resourceMetadataUrl,
       ...(principal.daykeeper.fetch
         ? { fetch: principal.daykeeper.fetch }
         : {}),

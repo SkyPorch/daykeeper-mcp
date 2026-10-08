@@ -309,7 +309,7 @@ test("get_dashboard composes plan, usage, inbox and the first open page", async 
   assert.equal(page.status, "open");
   assert.equal(page.showing, 2);
   assert.equal(page.more, true);
-  assert.equal(page.nextCursor, "c2");
+  assert.equal(page.nextCursor, "c2.open");
   assert.equal(page.summary, "Showing 2, more available.");
   assert.deepEqual(result.unavailable, []);
   const list = calls.find((call) =>
@@ -376,11 +376,16 @@ test("list_conversations pages by cursor and never claims a total", async (conte
   );
   assert.equal(first.summary, "Showing 2, more available.");
   assert.equal(first.more, true);
+  assert.equal(first.nextCursor, "c2.resolved");
   assert(!("total" in first));
   const second = data(
     await client.callTool({
       name: "list_conversations",
-      arguments: { workspaceId: TENANT, status: "all", cursor: "c2" },
+      arguments: {
+        workspaceId: TENANT,
+        status: "resolved",
+        cursor: "c2.resolved",
+      },
     }),
   );
   assert.equal(second.summary, "Showing 2.");
@@ -388,15 +393,50 @@ test("list_conversations pages by cursor and never claims a total", async (conte
   assert.equal(second.nextCursor, null);
   assert.equal(calls[0]!.url.searchParams.get("status"), "resolved");
   assert.equal(calls[0]!.url.searchParams.get("limit"), "2");
-  // "all" is the absence of a filter, not a status value.
-  assert.equal(calls[1]!.url.searchParams.get("status"), null);
-  assert.equal(calls[1]!.url.searchParams.get("cursor"), "c2");
+  assert.equal(calls[1]!.url.searchParams.get("cursor"), "c2.resolved");
   const bad = await client.callTool({
     name: "list_conversations",
     arguments: { workspaceId: TENANT, cursor: "bad cursor" },
   });
   assert.equal(bad.isError, true);
   assert.equal(calls.length, 2);
+});
+
+test("list_conversations sends every status filter explicitly, all included", async (context) => {
+  const { client, calls } = await dashboard(context);
+  for (const status of ["open", "resolved", "pending", "snoozed", "all"]) {
+    const result = data(
+      await client.callTool({
+        name: "list_conversations",
+        arguments: { workspaceId: TENANT, status },
+      }),
+    );
+    assert.equal(result.status, status);
+  }
+  data(
+    await client.callTool({
+      name: "list_conversations",
+      arguments: { workspaceId: TENANT },
+    }),
+  );
+  assert.deepEqual(
+    calls.map((call) => call.url.searchParams.get("status")),
+    ["open", "resolved", "pending", "snoozed", "all", "open"],
+  );
+  const invalid = await client.callTool({
+    name: "list_conversations",
+    arguments: { workspaceId: TENANT, status: "closed" },
+  });
+  assert.equal(invalid.isError, true);
+  assert.equal(calls.length, 6);
+  // A cursor from another status is the API's call to refuse.
+  const crossed = failure(
+    await client.callTool({
+      name: "list_conversations",
+      arguments: { workspaceId: TENANT, status: "all", cursor: "c2.open" },
+    }),
+  );
+  assert.equal(crossed.code, "INVALID_CURSOR");
 });
 
 test("get_conversation reads one page of messages", async (context) => {
@@ -621,4 +661,176 @@ test("dashboard calls never follow a redirect", async (context) => {
   assert.equal(error.status, 302);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.url.origin, new URL(BASE_URL).origin);
+});
+
+test("send_reply reports a replayed answer from the idempotent-replayed header", async (context) => {
+  const { client, calls } = await dashboard(context);
+  const key = "reply-replay-key-0000000000001";
+  const args = {
+    workspaceId: TENANT,
+    conversationId: 41,
+    content: "Thanks!",
+    idempotencyKey: key,
+  };
+  const first = data(
+    await client.callTool({ name: "send_reply", arguments: args }),
+  );
+  assert.equal(first.replayed, false);
+  const again = data(
+    await client.callTool({ name: "send_reply", arguments: args }),
+  );
+  assert.equal(again.replayed, true);
+  assert.deepEqual(again.message, first.message);
+  assert.equal(calls.length, 2);
+});
+
+test("send_reply explains in-progress, unknown-outcome and reused-key refusals", async (context) => {
+  const cases: Array<[Response, (error: Record<string, unknown>) => void]> = [
+    [
+      apiError(409, "REQUEST_IN_PROGRESS", true),
+      (error) => {
+        assert.equal(error.outcome, undefined);
+        assert.equal(error.status, 409);
+        assert.match(String(error.message), /still being processed/);
+        assert.match(String(error.message), /same key/);
+      },
+    ],
+    [
+      apiError(409, "REQUEST_OUTCOME_UNKNOWN", false, { outcomeUnknown: true }),
+      (error) => {
+        assert.equal(error.outcome, "unknown");
+        assert.equal(error.retryable, false);
+        assert.match(String(error.message), /may already have been sent/);
+        assert(
+          (error.nextActions as string[]).includes(
+            "reuse_original_idempotency_key",
+          ),
+        );
+      },
+    ],
+    [
+      apiError(422, "IDEMPOTENCY_KEY_REUSED"),
+      (error) => {
+        assert.equal(error.outcome, undefined);
+        assert.equal(error.status, 422);
+        assert.match(
+          String(error.message),
+          /already used for a different reply/,
+        );
+        assert(
+          (error.nextActions as string[]).includes(
+            "use_a_fresh_key_only_for_a_different_request",
+          ),
+        );
+      },
+    ],
+  ];
+  for (const [answer, check] of cases) {
+    let attempts = 0;
+    const { client } = await dashboard(context, {
+      override: (call) => {
+        if (call.method !== "POST") return undefined;
+        attempts++;
+        return answer.clone();
+      },
+    });
+    const key = "reply-refusal-key-00000000001";
+    const error = failure(
+      await client.callTool({
+        name: "send_reply",
+        arguments: {
+          workspaceId: TENANT,
+          conversationId: 41,
+          content: "Hi",
+          idempotencyKey: key,
+        },
+      }),
+    );
+    assert.equal(attempts, 1);
+    assert.equal(error.idempotencyKey, key);
+    check(error);
+  }
+});
+
+test("set_conversation_status checks the API echoes the same conversation", async (context) => {
+  const { client } = await dashboard(context, {
+    override: (call) =>
+      call.url.pathname.endsWith("/status")
+        ? Response.json({
+            data: { tenantId: TENANT, conversationId: 99, status: "resolved" },
+          })
+        : undefined,
+  });
+  const error = failure(
+    await client.callTool({
+      name: "set_conversation_status",
+      arguments: {
+        workspaceId: TENANT,
+        conversationId: 41,
+        status: "resolved",
+      },
+    }),
+  );
+  assert.equal(error.code, "INVALID_API_RESPONSE");
+});
+
+test("a 401 from the API carries the reconnect challenge only when the resource is known", async (context) => {
+  const metadata =
+    "https://api.mydaykeeper.com/.well-known/oauth-protected-resource/mcp";
+  const revoked = () => apiError(401, "UNAUTHENTICATED");
+  for (const resourceMetadataUrl of [metadata, undefined]) {
+    const api = fakeDaykeeperApi({ override: revoked });
+    const client = await harness(
+      context,
+      {
+        toolProfile: "dashboard",
+        scopes: ALL_SCOPES,
+        fetch: api.fetch,
+        ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+      },
+      "modern",
+    );
+    for (const [name, args] of [
+      ["get_profile", {}],
+      [
+        "send_reply",
+        { workspaceId: TENANT, conversationId: 41, content: "Hi" },
+      ],
+    ] as const) {
+      const result = await client.callTool({ name, arguments: args });
+      const error = failure(result);
+      assert.equal(error.status, 401);
+      assert.match(String(error.message), /Reconnect Daykeeper/);
+      const challenge = result._meta?.["mcp/www_authenticate"];
+      if (!resourceMetadataUrl) {
+        assert.equal(challenge, undefined);
+        continue;
+      }
+      assert(Array.isArray(challenge) && challenge.length === 1);
+      assert.equal(
+        challenge[0],
+        `Bearer resource_metadata="${metadata}", error="invalid_token", error_description="Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."`,
+      );
+    }
+  }
+  // A 403 is a permission answer, not a reason to reconnect.
+  const api = fakeDaykeeperApi({
+    override: () => apiError(403, "FORBIDDEN"),
+  });
+  const client = await harness(
+    context,
+    {
+      toolProfile: "dashboard",
+      scopes: ALL_SCOPES,
+      fetch: api.fetch,
+      resourceMetadataUrl: metadata,
+    },
+    "modern",
+  );
+  const forbidden = await client.callTool({
+    name: "get_profile",
+    arguments: {},
+  });
+  assert.equal(forbidden.isError, true);
+  assert.equal(forbidden._meta?.["mcp/www_authenticate"], undefined);
 });

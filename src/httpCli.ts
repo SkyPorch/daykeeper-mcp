@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   }
   if (args.length === 1 && args[0] === "--help") {
     process.stdout.write(
-      "Daykeeper MCP hosted HTTP server (Daykeeper Dashboard for ChatGPT)\nRequired: DAYKEEPER_MCP_RESOURCE_URL, DAYKEEPER_INTERNAL_API_URL, DAYKEEPER_OAUTH_ISSUER, DAYKEEPER_OAUTH_INTROSPECTION_SECRET.\nOptional: DAYKEEPER_MCP_HTTP_PORT (4108), DAYKEEPER_MCP_HTTP_HOST (0.0.0.0), DAYKEEPER_MCP_ALLOWED_HOSTNAMES (resource host), DAYKEEPER_MCP_ALLOWED_ORIGINS (https://chatgpt.com), DAYKEEPER_MCP_INTERNAL_HOSTNAMES (daykeeper-api), DAYKEEPER_MCP_WIDGET_DOMAIN.\nServes /healthz, the protected-resource metadata and the MCP endpoint. Bearers are verified by introspection and passed through to the internal API.\n",
+      "Daykeeper MCP hosted HTTP server (Daykeeper Dashboard for ChatGPT)\nRequired: DAYKEEPER_MCP_RESOURCE_URL, DAYKEEPER_INTERNAL_API_URL, DAYKEEPER_OAUTH_ISSUER, DAYKEEPER_OAUTH_INTROSPECTION_SECRET, DAYKEEPER_MCP_WIDGET_DOMAIN.\nOptional: DAYKEEPER_MCP_HTTP_PORT (4108), DAYKEEPER_MCP_HTTP_HOST (0.0.0.0), DAYKEEPER_MCP_ALLOWED_HOSTNAMES (resource host), DAYKEEPER_MCP_ALLOWED_ORIGINS (https://chatgpt.com), DAYKEEPER_MCP_INTERNAL_HOSTNAMES (daykeeper-api).\nServes /healthz, the protected-resource metadata and the MCP endpoint. Bearers are verified by introspection and passed through to the internal API.\n",
     );
     return;
   }

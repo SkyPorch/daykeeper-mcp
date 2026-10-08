@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { McpAdapterError } from "./errors.ts";
 
 export const MCP_VERSION = "0.3.0";
@@ -50,6 +51,19 @@ interface DaykeeperMcpBaseOptions {
    * entrypoints set this; it is not read from the stdio environment.
    */
   internalHttpHostnames?: readonly string[];
+  /**
+   * Hosted pass-through only: the end client's `X-Forwarded-For` chain, sent
+   * on every API call so per-client rate limits see the real client. It is
+   * sent only when the API host is in `internalHttpHostnames`; a value that is
+   * not a short list of IP literals is dropped, never forwarded.
+   */
+  forwardedFor?: string;
+  /**
+   * The RFC 9728 metadata URL of the MCP resource. When set, a tool whose API
+   * call is refused with 401 carries `_meta["mcp/www_authenticate"]` so the
+   * client can ask the person to reconnect.
+   */
+  resourceMetadataUrl?: string;
   fetch?: typeof globalThis.fetch;
 }
 
@@ -93,6 +107,10 @@ export interface DaykeeperMcpConfig {
   /** "general" is the gated catalog; "dashboard" is the fixed ChatGPT set. */
   readonly toolProfile: "general" | DaykeeperMcpToolProfile;
   readonly dashboardWidgetDomain: string | undefined;
+  readonly internalHttpHostnames: readonly string[];
+  /** Validated forwarded chain, present only for an internal API host. */
+  readonly forwardedFor: string | undefined;
+  readonly resourceMetadataUrl: string | undefined;
 }
 
 export function validateOptions(
@@ -107,9 +125,10 @@ export function validateOptions(
     const url = new URL(options.baseUrl);
     // These are the loopback hosts supported by the pinned management SDK.
     const loopback = ["localhost", "127.0.0.1"].includes(url.hostname);
-    const internal = normalizeInternalHostnames(
+    const internalHostnames = normalizeInternalHostnames(
       options.internalHttpHostnames,
-    ).includes(url.hostname);
+    );
+    const internal = internalHostnames.includes(url.hostname);
     if (
       (url.protocol !== "https:" &&
         !(url.protocol === "http:" && (loopback || internal))) ||
@@ -163,6 +182,15 @@ export function validateOptions(
         new URL(widgetDomain).origin !== widgetDomain)
     )
       throw invalidConfig();
+    const metadataUrl = options.resourceMetadataUrl;
+    if (
+      metadataUrl !== undefined &&
+      (typeof metadataUrl !== "string" ||
+        new URL(metadataUrl).protocol !== "https:" ||
+        new URL(metadataUrl).href !== metadataUrl ||
+        /["\\\s]/.test(metadataUrl))
+    )
+      throw invalidConfig();
     return Object.freeze({
       baseUrl: url.href.replace(/\/$/, ""),
       accessToken: credential,
@@ -179,6 +207,11 @@ export function validateOptions(
       scopes,
       toolProfile: options.toolProfile ?? "general",
       dashboardWidgetDomain: widgetDomain,
+      internalHttpHostnames: internalHostnames,
+      forwardedFor: internal
+        ? normalizeForwardedFor(options.forwardedFor)
+        : undefined,
+      resourceMetadataUrl: metadataUrl,
     });
   } catch {
     throw invalidConfig();
@@ -237,6 +270,32 @@ export function readEnvironment(
     enableOperatorWrites: config.enableOperatorWrites,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
+}
+
+export const MAX_FORWARDED_FOR_ENTRIES = 8;
+export const MAX_FORWARDED_FOR_LENGTH = 512;
+
+/**
+ * A comma-separated chain of bare IPv4/IPv6 literals (no ports, brackets or
+ * zone ids), at most 8 entries and 512 characters. Anything else yields
+ * undefined: the header is dropped entirely rather than forwarded.
+ */
+export function normalizeForwardedFor(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_FORWARDED_FOR_LENGTH
+  )
+    return undefined;
+  const entries = value.split(",").map((entry) => entry.trim());
+  if (
+    entries.length > MAX_FORWARDED_FOR_ENTRIES ||
+    entries.some(
+      (entry) => entry === "" || entry.includes("%") || isIP(entry) === 0,
+    )
+  )
+    return undefined;
+  return entries.join(", ");
 }
 
 const INTERNAL_HOSTNAME =

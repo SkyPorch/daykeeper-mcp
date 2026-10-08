@@ -7,7 +7,12 @@ import {
 } from "@skyporch/daykeeper";
 import { z } from "zod";
 import type { DaykeeperMcpConfig } from "./config.ts";
-import { CURSOR_PATTERN, type DashboardApi } from "./dashboardApi.ts";
+import {
+  CONVERSATION_STATUS_FILTERS,
+  CURSOR_PATTERN,
+  type ConversationStatusFilter,
+  type DashboardApi,
+} from "./dashboardApi.ts";
 import { DASHBOARD_WIDGET_URI } from "./dashboardWidget.ts";
 import { McpAdapterError } from "./errors.ts";
 import { inboxSdk } from "./sdkInbox.ts";
@@ -98,7 +103,7 @@ const page = {
 };
 const conversationsOutput = z.strictObject({
   workspaceId: z.string(),
-  status: z.enum(["open", "resolved", "all"]),
+  status: z.enum(CONVERSATION_STATUS_FILTERS),
   conversations: z.array(conversation),
   ...page,
 });
@@ -147,7 +152,7 @@ const replyOutput = z.strictObject({
   conversationId: z.number().int(),
   sent: z.literal(true),
   idempotencyKey: z.string(),
-  replayed: z.boolean().optional(),
+  replayed: z.boolean(),
   message,
 });
 const statusOutput = z.strictObject({
@@ -349,15 +354,17 @@ const definitions: readonly ToolDefinition[] = [
     name: "list_conversations",
     title: "List conversations",
     description:
-      "List one page of a workspace's support conversations, newest activity first. Filter by open, resolved or all. Never a total count: when more is true, pass nextCursor to get the next page.",
+      "List one page of a workspace's support conversations, newest activity first. Filter by status: open, resolved, pending, snoozed or all. Never a total count: when more is true, pass nextCursor with the same status to get the next page.",
     effect: "read",
     scopes: [CONVERSATIONS_READ],
     input: z.strictObject({
       workspaceId,
       status: z
-        .enum(["open", "resolved", "all"])
+        .enum(CONVERSATION_STATUS_FILTERS)
         .default("open")
-        .describe("Which conversations to list. Defaults to open."),
+        .describe(
+          "Which conversations to list. Defaults to open. A cursor only continues the status it came from.",
+        ),
       cursor: cursor.optional(),
       limit: limit.optional(),
     }),
@@ -453,7 +460,7 @@ const definitions: readonly ToolDefinition[] = [
     run: async ({ api, signal }, input) => {
       const key = input.idempotencyKey;
       if (!key) throw invalidResponse();
-      const value = await api.reply(
+      const reply = await api.reply(
         input.workspaceId,
         input.conversationId,
         input.content,
@@ -464,18 +471,16 @@ const definitions: readonly ToolDefinition[] = [
         .object({
           conversationId: z.literal(input.conversationId),
           message: z.object(message.shape),
-          replayed: z.boolean().optional(),
         })
-        .safeParse(value);
+        .safeParse(reply.data);
       if (!parsed.success) throw invalidResponse();
       return {
         workspaceId: input.workspaceId.toLowerCase(),
         conversationId: input.conversationId,
         sent: true,
         idempotencyKey: key,
-        ...(parsed.data.replayed === undefined
-          ? {}
-          : { replayed: parsed.data.replayed }),
+        // A replay is the stored original answer: nothing was sent twice.
+        replayed: reply.replayed,
         message: parsed.data.message,
       };
     },
@@ -510,9 +515,17 @@ const definitions: readonly ToolDefinition[] = [
         signal,
       );
       const parsed = z
-        .object({ status: z.enum(["open", "resolved"]) })
+        .object({
+          tenantId: z.string(),
+          conversationId: z.literal(input.conversationId),
+          status: z.enum(["open", "resolved"]),
+        })
         .safeParse(value);
-      if (!parsed.success) throw invalidResponse();
+      if (
+        !parsed.success ||
+        parsed.data.tenantId.toLowerCase() !== input.workspaceId.toLowerCase()
+      )
+        throw invalidResponse();
       return {
         workspaceId: input.workspaceId.toLowerCase(),
         conversationId: input.conversationId,
@@ -667,7 +680,7 @@ async function listConversations(
   api: DashboardApi,
   tenantId: string,
   input: {
-    status?: "open" | "resolved" | "all";
+    status?: ConversationStatusFilter;
     cursor?: string;
     limit?: number;
   },

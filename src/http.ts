@@ -12,7 +12,13 @@ import {
   type ServerEventBus,
   type ServerNotifier,
 } from "@modelcontextprotocol/server";
-import { validateOptions, type DaykeeperMcpOptions } from "./config.ts";
+import {
+  normalizeInternalHostnames,
+  SCOPE_PATTERN,
+  validateOptions,
+  type DaykeeperMcpOptions,
+  type DaykeeperMcpToolProfile,
+} from "./config.ts";
 import {
   createDaykeeperMcpServerForRuntime,
   type DaykeeperMcpRuntime,
@@ -89,27 +95,30 @@ export interface DaykeeperMcpHttpPrincipal {
   readonly daykeeper: RemoteDaykeeperOptions;
 }
 
-export interface DaykeeperMcpHttpOptions {
+interface DaykeeperMcpHttpBaseOptions {
   /** Canonical public MCP resource URL, including its endpoint path. */
   readonly resourceServerUrl: URL;
   /** Exact, canonical management API URL allowed for downstream SDK calls. */
   readonly daykeeperApiUrl: URL;
-  /** RFC 8414 metadata for the authorization server trusted by this host. */
-  readonly oauthMetadata: OAuthMetadata;
+  /**
+   * RFC 8414 metadata for the authorization server trusted by this host.
+   * Required while this host serves `/.well-known/oauth-authorization-server`.
+   */
+  readonly oauthMetadata?: OAuthMetadata;
+  /**
+   * The trusted authorization server's exact issuer, for a host that does not
+   * serve AS metadata itself (another app on the same origin owns that route).
+   * Give exactly one of `oauthMetadata` or this.
+   */
+  readonly authorizationServerIssuer?: string;
+  /**
+   * Serve RFC 8414 metadata at `/.well-known/oauth-authorization-server` on
+   * this origin. Defaults to true for compatibility; set false when the
+   * authorization server publishes it on the same origin.
+   */
+  readonly serveAuthorizationServerMetadata?: boolean;
   /** Validates expiry, revocation, audience and scopes for the MCP bearer. */
   readonly verifier: DaykeeperMcpTokenVerifier;
-  /**
-   * Resolves an authenticated MCP identity to one tenant-scoped downstream
-   * credential. Return null to refuse the principal. Never return the incoming
-   * MCP bearer token or a shared cross-tenant credential.
-   */
-  readonly resolvePrincipal: (
-    authInfo: Readonly<DaykeeperMcpVerifiedAuthInfo>,
-    context: DaykeeperMcpPrincipalContext,
-  ) =>
-    | DaykeeperMcpHttpPrincipal
-    | null
-    | Promise<DaykeeperMcpHttpPrincipal | null>;
   /** Hostnames only. The canonical resource hostname must be included. */
   readonly allowedHostnames: readonly string[];
   /** Exact HTTPS origins allowed to call the MCP endpoint from a browser. */
@@ -128,6 +137,63 @@ export interface DaykeeperMcpHttpOptions {
   readonly onerror?: (message: string) => void;
 }
 
+/**
+ * Default mode: every request exchanges the verified MCP bearer for a separate
+ * principal-scoped downstream credential.
+ */
+export interface DaykeeperMcpHttpExchangeOptions extends DaykeeperMcpHttpBaseOptions {
+  readonly downstreamCredential?: "exchange";
+  /**
+   * Resolves an authenticated MCP identity to one tenant-scoped downstream
+   * credential. Return null to refuse the principal. Never return the incoming
+   * MCP bearer token or a shared cross-tenant credential.
+   */
+  readonly resolvePrincipal: (
+    authInfo: Readonly<DaykeeperMcpVerifiedAuthInfo>,
+    context: DaykeeperMcpPrincipalContext,
+  ) =>
+    | DaykeeperMcpHttpPrincipal
+    | null
+    | Promise<DaykeeperMcpHttpPrincipal | null>;
+}
+
+/**
+ * Explicit opt-in: the verified MCP bearer itself is forwarded to the
+ * Daykeeper API. Valid only when the authorization server issued that token
+ * for this exact resource and the API accepts the same resource, as with
+ * Daykeeper's own OAuth server. It is never inferred from other settings.
+ */
+export interface DaykeeperMcpHttpPassthroughOptions extends DaykeeperMcpHttpBaseOptions {
+  readonly downstreamCredential: "passthrough";
+  readonly resolvePrincipal?: never;
+  readonly passthrough: {
+    /** The fixed tool profile served to pass-through principals. */
+    readonly toolProfile: DaykeeperMcpToolProfile;
+    /** Exact private hostnames `daykeeperApiUrl` may use over plain HTTP. */
+    readonly internalHttpHostnames?: readonly string[];
+    readonly timeoutMs?: number;
+    /** Dedicated HTTPS origin for the dashboard UI (`_meta.ui.domain`). */
+    readonly widgetDomain?: string;
+    /** Test seam for the downstream transport. */
+    readonly fetch?: typeof globalThis.fetch;
+  };
+}
+
+export type DaykeeperMcpHttpOptions =
+  DaykeeperMcpHttpExchangeOptions | DaykeeperMcpHttpPassthroughOptions;
+
+/**
+ * Throw this from a verifier when the token could not be checked at all (the
+ * introspection service timed out or failed). The handler answers 503 rather
+ * than a 401 that would send the client through re-authorization.
+ */
+export class DaykeeperMcpVerifierUnavailableError extends Error {
+  constructor() {
+    super("Token verification is temporarily unavailable.");
+    this.name = "DaykeeperMcpVerifierUnavailableError";
+  }
+}
+
 export interface DaykeeperMcpHttpHandler {
   readonly fetch: (request: Request) => Promise<Response>;
   readonly close: () => Promise<void>;
@@ -135,9 +201,16 @@ export interface DaykeeperMcpHttpHandler {
   readonly bus: ServerEventBus;
 }
 
+type PassthroughSettings = Omit<
+  DaykeeperMcpHttpPassthroughOptions["passthrough"],
+  "internalHttpHostnames"
+> & { readonly internalHttpHostnames: readonly string[] };
+
 interface ValidatedHttpOptions {
   readonly resourceServerUrl: URL;
   readonly daykeeperApiUrl: URL;
+  readonly passthrough: PassthroughSettings | undefined;
+  readonly serveAuthorizationServerMetadata: boolean;
   readonly metadataOptions: Parameters<typeof oauthMetadataResponse>[1];
   readonly resourceMetadataUrl: string;
   readonly allowedHostnames: string[];
@@ -205,7 +278,10 @@ export function createDaykeeperMcpHttpHandler(
   const verifyAccessToken = options.verifier.verifyAccessToken.bind(
     options.verifier,
   );
-  const resolvePrincipal = options.resolvePrincipal;
+  const resolvePrincipal =
+    options.downstreamCredential === "passthrough"
+      ? undefined
+      : options.resolvePrincipal;
   const reportError = options.onerror;
 
   const handler: McpHttpHandler = createMcpHandler(
@@ -228,8 +304,14 @@ export function createDaykeeperMcpHttpHandler(
     );
     if (hostRejection) return hostRejection;
 
-    const metadata = oauthMetadataResponse(request, config.metadataOptions);
-    if (metadata) return metadata;
+    const metadataPath = new URL(request.url).pathname.replace(/(.)\/$/, "$1");
+    if (
+      config.serveAuthorizationServerMetadata ||
+      metadataPath !== "/.well-known/oauth-authorization-server"
+    ) {
+      const metadata = oauthMetadataResponse(request, config.metadataOptions);
+      if (metadata) return metadata;
+    }
 
     const requestUrl = new URL(request.url);
     if (
@@ -272,9 +354,16 @@ export function createDaykeeperMcpHttpHandler(
     )
       return withCors(safeResponse(413, "MCP request is too large."), origin);
 
-    const bearer = parseBearer(request.headers.get("authorization"));
+    const authorization = request.headers.get("authorization");
+    const bearer = parseBearer(authorization);
     if (bearer === null)
-      return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+      return withCors(
+        invalidTokenResponse(
+          config.resourceMetadataUrl,
+          authorization !== null,
+        ),
+        origin,
+      );
     if (authenticating >= config.maxConcurrentAuthentications)
       return withCors(concurrencyResponse(), origin);
     const requestSignal = AbortSignal.any([request.signal, lifetime.signal]);
@@ -308,7 +397,13 @@ export function createDaykeeperMcpHttpHandler(
         origin,
       );
     if (verificationOutcome.kind === "error")
-      return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+      return withCors(
+        verificationOutcome.error instanceof
+          DaykeeperMcpVerifierUnavailableError
+          ? safeResponse(503, "MCP authentication is unavailable.")
+          : invalidTokenResponse(config.resourceMetadataUrl),
+        origin,
+      );
     let auth: DaykeeperMcpVerifiedAuthInfo;
     try {
       auth = validateVerifiedAuth(
@@ -350,7 +445,10 @@ export function createDaykeeperMcpHttpHandler(
     };
     try {
       const resolution = beginInterruptible(
-        (signal) => resolvePrincipal(auth, { signal }),
+        (signal) =>
+          resolvePrincipal
+            ? resolvePrincipal(auth, { signal })
+            : passthroughPrincipal(auth, config),
         config.authenticationTimeoutMs,
         requestSignal,
       );
@@ -380,11 +478,13 @@ export function createDaykeeperMcpHttpHandler(
           safeResponse(403, "This principal cannot access Daykeeper MCP."),
           origin,
         );
-      principal = validatePrincipal(
-        resolutionOutcome.value,
-        auth,
-        config.daykeeperApiUrl,
-      );
+      principal = resolvePrincipal
+        ? validatePrincipal(
+            resolutionOutcome.value,
+            auth,
+            config.daykeeperApiUrl,
+          )
+        : resolutionOutcome.value;
       releaseDownstreamBinding = bindDownstreamCredential(
         downstreamBindings,
         activeDownstreamBindings,
@@ -443,7 +543,7 @@ export function createDaykeeperMcpHttpHandler(
 
 type InterruptibleOutcome<Value> =
   | { readonly kind: "value"; readonly value: Value }
-  | { readonly kind: "error" }
+  | { readonly kind: "error"; readonly error: unknown }
   | { readonly kind: "timeout" }
   | { readonly kind: "aborted" };
 
@@ -479,7 +579,7 @@ function beginInterruptible<Value>(
     .then(() => work(controller.signal))
     .then(
       (value) => ({ kind: "value", value }) as const,
-      () => ({ kind: "error" }) as const,
+      (error: unknown) => ({ kind: "error", error }) as const,
     );
   const settled = settledOutcome.then(() => undefined);
   const outcome = Promise.race([settledOutcome, interrupted]).finally(() => {
@@ -573,9 +673,14 @@ function validateHttpOptions(
       resourceServerUrl.pathname.endsWith("/")
     )
       throw new Error("invalid_resource_url");
+    const passthrough = validatePassthrough(options);
     const daykeeperApiUrl = new URL(options.daykeeperApiUrl.href);
+    const internalHttp =
+      passthrough !== undefined &&
+      daykeeperApiUrl.protocol === "http:" &&
+      passthrough.internalHttpHostnames.includes(daykeeperApiUrl.hostname);
     if (
-      daykeeperApiUrl.protocol !== "https:" ||
+      (daykeeperApiUrl.protocol !== "https:" && !internalHttp) ||
       daykeeperApiUrl.username ||
       daykeeperApiUrl.password ||
       daykeeperApiUrl.search ||
@@ -584,7 +689,20 @@ function validateHttpOptions(
         daykeeperApiUrl.pathname.endsWith("/"))
     )
       throw new Error("invalid_daykeeper_api_url");
-    const oauthMetadata = structuredClone(options.oauthMetadata);
+    const serveAuthorizationServerMetadata =
+      options.serveAuthorizationServerMetadata ?? true;
+    if (typeof serveAuthorizationServerMetadata !== "boolean")
+      throw new Error("invalid_metadata_flag");
+    if (
+      (options.oauthMetadata === undefined) ===
+      (options.authorizationServerIssuer === undefined)
+    )
+      throw new Error("one_authorization_server_source_required");
+    if (options.oauthMetadata === undefined && serveAuthorizationServerMetadata)
+      throw new Error("authorization_server_metadata_required");
+    const oauthMetadata: OAuthMetadata = options.oauthMetadata
+      ? structuredClone(options.oauthMetadata)
+      : issuerOnlyMetadata(options.authorizationServerIssuer);
     const allowedHostnames = unique(
       options.allowedHostnames.map(normalizeHostname),
     );
@@ -603,15 +721,17 @@ function validateHttpOptions(
       requiredScopes.some((scope) => !scopesSupported.includes(scope))
     )
       throw new Error("required_scope_not_supported");
-    if (!oauthMetadata.code_challenge_methods_supported?.includes("S256"))
-      throw new Error("pkce_s256_required");
-    if (!oauthMetadata.response_types_supported?.includes("code"))
-      throw new Error("authorization_code_response_required");
-    if (
-      oauthMetadata.grant_types_supported &&
-      !oauthMetadata.grant_types_supported.includes("authorization_code")
-    )
-      throw new Error("authorization_code_required");
+    if (options.oauthMetadata) {
+      if (!oauthMetadata.code_challenge_methods_supported?.includes("S256"))
+        throw new Error("pkce_s256_required");
+      if (!oauthMetadata.response_types_supported?.includes("code"))
+        throw new Error("authorization_code_response_required");
+      if (
+        oauthMetadata.grant_types_supported &&
+        !oauthMetadata.grant_types_supported.includes("authorization_code")
+      )
+        throw new Error("authorization_code_required");
+    }
     for (const endpoint of [
       oauthMetadata.issuer,
       oauthMetadata.authorization_endpoint,
@@ -647,6 +767,8 @@ function validateHttpOptions(
     return Object.freeze({
       resourceServerUrl,
       daykeeperApiUrl,
+      passthrough,
+      serveAuthorizationServerMetadata,
       metadataOptions,
       resourceMetadataUrl:
         getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
@@ -801,6 +923,131 @@ function boundedResponse(
       headers,
     }),
     ownsAdmission: true,
+  };
+}
+
+function validatePassthrough(
+  options: DaykeeperMcpHttpOptions,
+): PassthroughSettings | undefined {
+  const mode = options.downstreamCredential;
+  if (mode === undefined || mode === "exchange") {
+    // Exchange mode always needs a resolver, and a stray pass-through block
+    // without the explicit mode is a configuration mistake, not an opt-in.
+    if (
+      typeof options.resolvePrincipal !== "function" ||
+      (options as { passthrough?: unknown }).passthrough !== undefined
+    )
+      throw new Error("principal_resolver_required");
+    return undefined;
+  }
+  if (mode !== "passthrough") throw new Error("invalid_downstream_mode");
+  const settings = options.passthrough;
+  if (
+    options.resolvePrincipal !== undefined ||
+    !settings ||
+    typeof settings !== "object" ||
+    settings.toolProfile !== "dashboard" ||
+    (settings.fetch !== undefined && typeof settings.fetch !== "function")
+  )
+    throw new Error("invalid_passthrough");
+  // Validate the downstream settings once, with a synthetic credential.
+  validateOptions({
+    baseUrl: options.daykeeperApiUrl.href,
+    accessToken: "synthetic_passthrough_probe_credential",
+    toolProfile: settings.toolProfile,
+    internalHttpHostnames: settings.internalHttpHostnames,
+    ...(settings.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: settings.timeoutMs }),
+    ...(settings.widgetDomain === undefined
+      ? {}
+      : { dashboardWidgetDomain: settings.widgetDomain }),
+  });
+  return Object.freeze({
+    toolProfile: settings.toolProfile,
+    internalHttpHostnames: normalizeInternalHostnames(
+      settings.internalHttpHostnames,
+    ),
+    ...(settings.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: settings.timeoutMs }),
+    ...(settings.widgetDomain === undefined
+      ? {}
+      : { widgetDomain: settings.widgetDomain }),
+    ...(settings.fetch ? { fetch: settings.fetch } : {}),
+  });
+}
+
+/**
+ * Pass-through: the downstream credential is the verified MCP bearer, bound
+ * to the verified principal and grant and to no other tenant. Re-checks the
+ * resource here so this path never depends on an earlier check alone.
+ */
+function passthroughPrincipal(
+  auth: DaykeeperMcpVerifiedAuthInfo,
+  config: ValidatedHttpOptions,
+): DaykeeperMcpHttpPrincipal {
+  const settings = config.passthrough;
+  if (!settings) throw new Error("passthrough_not_enabled");
+  if (auth.resource.href !== config.resourceServerUrl.href)
+    throw new Error("passthrough_resource_mismatch");
+  const scopes = auth.scopes.filter((scope) => SCOPE_PATTERN.test(scope));
+  const downstream = validateOptions({
+    baseUrl: config.daykeeperApiUrl.href,
+    accessToken: auth.token,
+    toolProfile: settings.toolProfile,
+    internalHttpHostnames: settings.internalHttpHostnames,
+    scopes,
+    ...(settings.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: settings.timeoutMs }),
+    ...(settings.widgetDomain === undefined
+      ? {}
+      : { dashboardWidgetDomain: settings.widgetDomain }),
+  });
+  if (downstream.accessToken !== auth.token)
+    throw new Error("passthrough_token_mismatch");
+  return Object.freeze({
+    principalId: boundedIdentifier(auth.extra.daykeeperPrincipalId),
+    grantId: boundedIdentifier(auth.extra.daykeeperGrantId),
+    downstreamExpiresAt: auth.expiresAt,
+    daykeeper: Object.freeze({
+      baseUrl: downstream.baseUrl,
+      accessToken: downstream.accessToken,
+      timeoutMs: downstream.timeoutMs,
+      toolProfile: settings.toolProfile,
+      internalHttpHostnames: settings.internalHttpHostnames,
+      scopes: Object.freeze([...(downstream.scopes ?? [])]),
+      ...(downstream.dashboardWidgetDomain
+        ? { dashboardWidgetDomain: downstream.dashboardWidgetDomain }
+        : {}),
+      ...(settings.fetch ? { fetch: settings.fetch } : {}),
+    }),
+  });
+}
+
+/** Protected-resource metadata needs only the issuer; nothing else is served. */
+function issuerOnlyMetadata(issuer: string | undefined): OAuthMetadata {
+  if (
+    typeof issuer !== "string" ||
+    issuer !== issuer.trim() ||
+    issuer.endsWith("/")
+  )
+    throw new Error("invalid_issuer");
+  const parsed = new URL(issuer);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.username ||
+    parsed.password
+  )
+    throw new Error("invalid_issuer");
+  return {
+    issuer,
+    authorization_endpoint: issuer,
+    token_endpoint: issuer,
+    response_types_supported: ["code"],
   };
 }
 
@@ -1072,15 +1319,28 @@ function parseBearer(authorization: string | null): string | null {
   return match?.[1] ?? null;
 }
 
-function invalidTokenResponse(resourceMetadataUrl: string): Response {
-  return new Response(JSON.stringify({ error: "invalid_token" }), {
-    status: 401,
-    headers: {
-      "cache-control": "no-store",
-      "content-type": "application/json",
-      "www-authenticate": `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+/**
+ * RFC 6750 section 3.1: a request with no credentials gets a bare challenge;
+ * a presented but unusable token gets `error="invalid_token"`. Both name the
+ * RFC 9728 metadata so the client can (re)start authorization.
+ */
+function invalidTokenResponse(
+  resourceMetadataUrl: string,
+  presented = true,
+): Response {
+  return new Response(
+    JSON.stringify(presented ? { error: "invalid_token" } : {}),
+    {
+      status: 401,
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/json",
+        "www-authenticate": presented
+          ? `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`
+          : `Bearer resource_metadata="${resourceMetadataUrl}"`,
+      },
     },
-  });
+  );
 }
 
 function insufficientScopeResponse(

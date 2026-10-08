@@ -6,6 +6,7 @@ import {
 } from "./server.ts";
 export {
   createDaykeeperMcpHttpHandler,
+  DaykeeperMcpVerifierUnavailableError,
   MAX_HTTP_AUTHENTICATION_MS,
   MAX_HTTP_CONCURRENT_AUTHENTICATIONS,
   MAX_HTTP_CONCURRENT_REQUESTS,
@@ -16,8 +17,10 @@ export {
   MAX_HTTP_RESPONSE_BYTES,
 } from "./http.ts";
 export type {
+  DaykeeperMcpHttpExchangeOptions,
   DaykeeperMcpHttpHandler,
   DaykeeperMcpHttpOptions,
+  DaykeeperMcpHttpPassthroughOptions,
   DaykeeperMcpHttpPrincipal,
   DaykeeperMcpPrincipalContext,
   DaykeeperMcpTokenVerifier,
@@ -25,6 +28,13 @@ export type {
   DaykeeperMcpVerifierContext,
 } from "./http.ts";
 
+export {
+  createDaykeeperIntrospectionVerifier,
+  DEFAULT_INTROSPECTION_TIMEOUT_MS,
+  MAX_INTROSPECTION_CACHE_SECONDS,
+  MAX_INTROSPECTION_RESPONSE_BYTES,
+} from "./introspection.ts";
+export type { DaykeeperIntrospectionVerifierOptions } from "./introspection.ts";
 export {
   DASHBOARD_WIDGET_MIME_TYPE,
   DASHBOARD_WIDGET_URI,

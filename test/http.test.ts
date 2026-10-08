@@ -15,6 +15,7 @@ import {
   MAX_HTTP_REQUEST_READ_MS,
   MAX_HTTP_RESPONSE_BYTES,
   MAX_HTTP_RESPONSE_READ_MS,
+  type DaykeeperMcpHttpExchangeOptions,
   type DaykeeperMcpHttpOptions,
   type DaykeeperMcpHttpPrincipal,
   type DaykeeperMcpTokenVerifier,
@@ -75,7 +76,7 @@ function principal(
 }
 
 function options(
-  overrides: Partial<DaykeeperMcpHttpOptions> = {},
+  overrides: Partial<DaykeeperMcpHttpExchangeOptions> = {},
 ): DaykeeperMcpHttpOptions {
   return {
     resourceServerUrl: RESOURCE,

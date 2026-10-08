@@ -36,6 +36,18 @@ export {
 } from "./introspection.ts";
 export type { DaykeeperIntrospectionVerifierOptions } from "./introspection.ts";
 export {
+  DAYKEEPER_DASHBOARD_SCOPES,
+  DEFAULT_MCP_ALLOWED_ORIGINS,
+  DEFAULT_MCP_HTTP_PORT,
+  DEFAULT_MCP_INTERNAL_HOSTNAMES,
+  readHostedEnvironment,
+  startDaykeeperMcpHttpServer,
+} from "./hosted.ts";
+export type {
+  DaykeeperMcpHostedConfig,
+  DaykeeperMcpHttpServerHandle,
+} from "./hosted.ts";
+export {
   DASHBOARD_WIDGET_MIME_TYPE,
   DASHBOARD_WIDGET_URI,
 } from "./dashboardWidget.ts";

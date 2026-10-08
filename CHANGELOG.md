@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Daykeeper Dashboard tool profile (`toolProfile: "dashboard"`): exactly ten
+  ChatGPT-facing tools (`get_profile`, `list_workspaces`, `get_dashboard`,
+  `list_conversations`, `get_conversation`, `send_reply`,
+  `set_conversation_status`, `get_customer_email`, `set_customer_email`,
+  `show_dashboard`) with per-tool input/output schemas and annotations. The
+  profile replaces the general catalog; no general flag adds tools to it.
+- Dashboard UI resource `ui://daykeeper/dashboard-v1.html`
+  (`text/html;profile=mcp-app`), attached only to `show_dashboard`. It is
+  self-contained, makes no network requests and calls the same tools through
+  the MCP Apps bridge.
+- Pass-through credential mode for the HTTP handler
+  (`downstreamCredential: "passthrough"`), an explicit opt-in that forwards the
+  verified bearer to the API. Exchange mode stays the default.
+- `createDaykeeperIntrospectionVerifier`: RFC 7662 token verifier with a
+  timeout, response size cap, strict schema and a positive-only cache of at
+  most 30 s (never past `exp`).
+- `startDaykeeperMcpHttpServer` and the `daykeeper-mcp-http` bin: the hosted
+  ChatGPT endpoint, configured from `DAYKEEPER_MCP_*`, `DAYKEEPER_INTERNAL_API_URL`
+  and `DAYKEEPER_OAUTH_*` environment variables, with `/healthz` and graceful
+  shutdown.
+
+### Changed
+
+- The HTTP handler can stop serving `/.well-known/oauth-authorization-server`
+  (`serveAuthorizationServerMetadata: false`) and accept just the issuer
+  (`authorizationServerIssuer`). The default is unchanged.
+- A request with no credentials gets a bare `Bearer resource_metadata="…"`
+  challenge (RFC 6750 3.1); an unusable token still gets `invalid_token`.
+- A verifier that throws `DaykeeperMcpVerifierUnavailableError` produces 503
+  instead of a 401 re-authorization challenge.
+
+### Fixed
+
+- Hosted principals kept every feature gate except `enableClaimTools`, which
+  was silently dropped.
+
 ## 0.3.0
 
 ### Contract

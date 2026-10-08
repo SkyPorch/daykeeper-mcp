@@ -95,6 +95,32 @@ characters drawn from letters, digits, `.`, `_`, `:`, and `-`; it is carried in
 the SDK's idempotency header, not reconstructed after a failure. No helper
 polls or repeats work.
 
+## Daykeeper Dashboard profile
+
+With `toolProfile: "dashboard"` (the hosted ChatGPT endpoint) the server
+exposes exactly these ten tools and none of the general catalog. Results are
+flat per-tool `structuredContent`; failures set `isError` and return
+`{tool, error: {code, message, retryable, status?, outcome?, idempotencyKey?, nextActions, correlationId?}}`.
+
+| Tool                      | Effect                         | Scope                 | Notes                                                                                                                                                               |
+| ------------------------- | ------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_profile`             | read                           | `accounts:read`       | `{id, name?, email?}`; `_meta["openai/profile"]: true`; the id is an opaque digest of person + account                                                              |
+| `list_workspaces`         | read                           | `accounts:read`       | tenants as workspaces                                                                                                                                               |
+| `get_dashboard`           | read                           | `accounts:read`       | plan, usage, inbox, first open page; 403/404/503 sections are omitted and listed in `unavailable`                                                                   |
+| `list_conversations`      | read                           | `conversations:read`  | `status` open/resolved/all, `cursor`, `limit`; `showing`, `more`, `nextCursor`, never a total                                                                       |
+| `get_conversation`        | read                           | `conversations:read`  | one page of messages                                                                                                                                                |
+| `send_reply`              | write, destructive, open world | `conversations:write` | sends now; one `idempotencyKey` per reply (minted if omitted, always returned); never retried; an uncertain send returns `outcome: "unknown"` with the key to reuse |
+| `set_conversation_status` | write                          | `conversations:write` | `resolved` or `open`                                                                                                                                                |
+| `get_customer_email`      | read                           | `accounts:read`       |                                                                                                                                                                     |
+| `set_customer_email`      | write                          | `accounts:write`      | `enabled` boolean; owners only                                                                                                                                      |
+| `show_dashboard`          | read                           | `accounts:read`       | same data as `get_dashboard`; the only tool with `_meta.ui.resourceUri`                                                                                             |
+
+Writes are refused locally when the connection's granted scopes lack the
+required scope. Drafting a reply is not a tool. The calls the published SDK
+0.3.0 lacks (`/v1/me`, paginated conversation reads, idempotent replies,
+conversation status, customer email) use a small internal client with the same
+origin, redirect, size and deadline rails as SDK calls.
+
 ## Flow writes
 
 Each flow write takes an explicit `idempotencyKey` of 16–128 characters drawn

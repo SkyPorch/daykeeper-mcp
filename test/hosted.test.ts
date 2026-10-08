@@ -217,8 +217,19 @@ test("hosted server answers health, metadata and the 401 challenge over real HTT
   });
   assert.equal(wrongHost.status, 403);
 
-  const absolute = await raw(handle.address, "//evil.example.test/mcp");
-  assert.equal(absolute.status, 400);
+  for (const target of [
+    "//evil.example.test/mcp",
+    "/\\evil.example.test/mcp",
+    "/mcp\\..\\x",
+    "/%5Cevil.example.test/mcp".replace("%5C", "\\"),
+  ]) {
+    const refused = await raw(handle.address, target, {
+      method: "POST",
+      headers: { authorization: `Bearer ${BEARER}` },
+      body: "{}",
+    });
+    assert.equal(refused.status, 400, target);
+  }
 });
 
 test("the official MCP client completes a session against the hosted server", async (context) => {
@@ -329,4 +340,100 @@ test("close stops the listener and later connections are refused", async () => {
   await handle.close();
   await handle.close();
   await assert.rejects(raw(address, "/healthz"));
+});
+
+test("shutdown stops accepting but lets a send in flight finish", async (context) => {
+  const network = internalNetwork();
+  let releaseReply!: () => void;
+  const replyHeld = new Promise<void>((resolve) => (releaseReply = resolve));
+  let replyArrived!: () => void;
+  const arrived = new Promise<void>((resolve) => (replyArrived = resolve));
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === "POST" && request.url.endsWith("/messages")) {
+      replyArrived();
+      await replyHeld;
+    }
+    return network.fetch(input, init);
+  };
+  const handle = await startDaykeeperMcpHttpServer(ENV, {
+    fetch,
+    shutdownGraceMs: 5_000,
+  });
+  const client = new Client(
+    { name: "daykeeper-hosted-drain", version: "0.0.0" },
+    { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+  );
+  await client.connect(
+    new StreamableHTTPClientTransport(
+      new URL("https://api.mydaykeeper.com/mcp"),
+      {
+        authProvider: { token: async () => BEARER },
+        fetch: async (input, init) =>
+          viaListener(handle.address, new Request(input, init)),
+      },
+    ),
+    { timeout: 5_000 },
+  );
+  const sending = client.callTool({
+    name: "send_reply",
+    arguments: {
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      conversationId: 41,
+      content: "On its way",
+    },
+  });
+  await arrived;
+  // SIGTERM arrives while the reply is in flight.
+  let closed = false;
+  const closing = handle.close().then(() => {
+    closed = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(closed, false);
+  // New connections are refused while draining.
+  await assert.rejects(raw(handle.address, "/healthz"));
+  releaseReply();
+  const result = await sending;
+  assert.equal(result.isError ?? false, false, JSON.stringify(result));
+  assert.equal((result.structuredContent as { sent: boolean }).sent, true);
+  await closing;
+  assert.equal(closed, true);
+  context.after(() => client.close().catch(() => undefined));
+});
+
+test("forwarded addresses are ignored unless the listener's peer is a trusted proxy", async (context) => {
+  const network = internalNetwork();
+  // The test client connects from 127.0.0.1, outside this narrowed list.
+  const handle = await startDaykeeperMcpHttpServer(
+    { ...ENV, DAYKEEPER_MCP_TRUSTED_PROXIES: "10.9.0.0/16" },
+    { fetch: network.fetch },
+  );
+  context.after(() => handle.close());
+  const client = new Client(
+    { name: "daykeeper-hosted-untrusted", version: "0.0.0" },
+    { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+  );
+  context.after(() => client.close());
+  await client.connect(
+    new StreamableHTTPClientTransport(
+      new URL("https://api.mydaykeeper.com/mcp"),
+      {
+        authProvider: { token: async () => BEARER },
+        fetch: async (input, init) =>
+          viaListener(handle.address, new Request(input, init)),
+      },
+    ),
+    { timeout: 5_000 },
+  );
+  await client.callTool({ name: "list_workspaces", arguments: {} });
+  assert(network.api.calls.length > 0);
+  for (const call of network.api.calls) assert.equal(call.forwardedFor, null);
+  await assert.rejects(
+    startDaykeeperMcpHttpServer({
+      ...ENV,
+      DAYKEEPER_MCP_TRUSTED_PROXIES: "caddy",
+    }),
+    /DAYKEEPER_MCP_TRUSTED_PROXIES/,
+  );
 });

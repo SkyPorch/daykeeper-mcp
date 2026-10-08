@@ -23,6 +23,7 @@ export type {
   DaykeeperMcpHttpPassthroughOptions,
   DaykeeperMcpHttpPrincipal,
   DaykeeperMcpPrincipalContext,
+  DaykeeperMcpRequestContext,
   DaykeeperMcpTokenVerifier,
   DaykeeperMcpVerifiedAuthInfo,
   DaykeeperMcpVerifierContext,
@@ -30,6 +31,7 @@ export type {
 
 export {
   createDaykeeperIntrospectionVerifier,
+  DEFAULT_INTROSPECTION_NEGATIVE_CACHE_SECONDS,
   DEFAULT_INTROSPECTION_TIMEOUT_MS,
   MAX_INTROSPECTION_CACHE_SECONDS,
   MAX_INTROSPECTION_RESPONSE_BYTES,
@@ -40,6 +42,7 @@ export {
   DEFAULT_MCP_ALLOWED_ORIGINS,
   DEFAULT_MCP_HTTP_PORT,
   DEFAULT_MCP_INTERNAL_HOSTNAMES,
+  PRE_AUTH_RATE_LIMIT,
   readHostedEnvironment,
   startDaykeeperMcpHttpServer,
 } from "./hosted.ts";
@@ -47,6 +50,10 @@ export type {
   DaykeeperMcpHostedConfig,
   DaykeeperMcpHttpServerHandle,
 } from "./hosted.ts";
+export {
+  DEFAULT_MCP_TRUSTED_PROXIES,
+  parseTrustedProxies,
+} from "./clientAddress.ts";
 export {
   DASHBOARD_WIDGET_MIME_TYPE,
   DASHBOARD_WIDGET_URI,

@@ -13,7 +13,12 @@ import {
   type ServerNotifier,
 } from "@modelcontextprotocol/server";
 import {
-  normalizeForwardedFor,
+  parseTrustedProxies,
+  resolveClient,
+  trustedProxyMatcher,
+  type TrustedProxyMatcher,
+} from "./clientAddress.ts";
+import {
   normalizeInternalHostnames,
   SCOPE_PATTERN,
   validateOptions,
@@ -136,6 +141,30 @@ interface DaykeeperMcpHttpBaseOptions {
   readonly maxConcurrentAuthentications?: number;
   readonly maxConcurrentRequestsPerPrincipal?: number;
   readonly onerror?: (message: string) => void;
+  /**
+   * Socket peers (addresses or CIDRs) allowed to set X-Forwarded-For.
+   * Defaults to loopback and the private ranges. A request from any other
+   * peer, or one whose peer is unknown, has the header ignored.
+   */
+  readonly trustedProxies?: readonly string[];
+  /**
+   * Per-client-address budget for failed authentications, checked before
+   * the verifier runs. Each refused bearer spends one token; an address with
+   * none left gets 429 without touching the verifier, so random-bearer floods
+   * never reach introspection. Valid traffic spends nothing, so many people
+   * behind one egress address (ChatGPT) are not throttled together. Off
+   * unless configured.
+   */
+  readonly preAuthRateLimit?: {
+    readonly burst: number;
+    readonly refillPerSecond: number;
+  };
+}
+
+/** What the listener knows about the connection that is not in the Request. */
+export interface DaykeeperMcpRequestContext {
+  /** The TCP peer address of the connection (for example Caddy's). */
+  readonly remoteAddress?: string;
 }
 
 /**
@@ -196,7 +225,10 @@ export class DaykeeperMcpVerifierUnavailableError extends Error {
 }
 
 export interface DaykeeperMcpHttpHandler {
-  readonly fetch: (request: Request) => Promise<Response>;
+  readonly fetch: (
+    request: Request,
+    context?: DaykeeperMcpRequestContext,
+  ) => Promise<Response>;
   readonly close: () => Promise<void>;
   readonly notify: ServerNotifier;
   readonly bus: ServerEventBus;
@@ -226,6 +258,9 @@ interface ValidatedHttpOptions {
   readonly maxConcurrentRequests: number;
   readonly maxConcurrentAuthentications: number;
   readonly maxConcurrentRequestsPerPrincipal: number;
+  readonly isTrustedProxy: TrustedProxyMatcher;
+  readonly preAuthRateLimit:
+    { readonly burst: number; readonly refillPerSecond: number } | undefined;
 }
 
 /**
@@ -298,7 +333,18 @@ export function createDaykeeperMcpHttpHandler(
       onerror: () => reportError?.("Daykeeper MCP request failed."),
     },
   );
-  const fetch = async (request: Request): Promise<Response> => {
+  const failureBudget = config.preAuthRateLimit
+    ? createFailureBudget(config.preAuthRateLimit)
+    : undefined;
+  const fetch = async (
+    request: Request,
+    context: DaykeeperMcpRequestContext = {},
+  ): Promise<Response> => {
+    const client = resolveClient(
+      context.remoteAddress,
+      request.headers.get("x-forwarded-for"),
+      config.isTrustedProxy,
+    );
     const hostRejection = hostHeaderValidationResponse(
       request,
       config.allowedHostnames,
@@ -365,6 +411,14 @@ export function createDaykeeperMcpHttpHandler(
         ),
         origin,
       );
+    if (failureBudget && !failureBudget.allows(client.clientAddress)) {
+      const limited = safeResponse(429, "Too many failed authentications.");
+      limited.headers.set(
+        "retry-after",
+        String(failureBudget.retryAfterSeconds()),
+      );
+      return withCors(limited, origin);
+    }
     if (authenticating >= config.maxConcurrentAuthentications)
       return withCors(concurrencyResponse(), origin);
     const requestSignal = AbortSignal.any([request.signal, lifetime.signal]);
@@ -397,6 +451,14 @@ export function createDaykeeperMcpHttpHandler(
         ),
         origin,
       );
+    if (
+      verificationOutcome.kind === "error" &&
+      !(
+        verificationOutcome.error instanceof
+        DaykeeperMcpVerifierUnavailableError
+      )
+    )
+      failureBudget?.charge(client.clientAddress);
     if (verificationOutcome.kind === "error")
       return withCors(
         verificationOutcome.error instanceof
@@ -422,6 +484,7 @@ export function createDaykeeperMcpHttpHandler(
           ),
           origin,
         );
+      failureBudget?.charge(client.clientAddress);
       return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
     }
 
@@ -452,9 +515,9 @@ export function createDaykeeperMcpHttpHandler(
             : passthroughPrincipal(
                 auth,
                 config,
-                // Set by the trusted proxy in front of this host (Caddy).
-                // Strictly validated; dropped entirely when malformed.
-                normalizeForwardedFor(request.headers.get("x-forwarded-for")),
+                // Only from a trusted proxy peer (Caddy), strictly
+                // validated, and dropped entirely when malformed.
+                client.forwardedFor,
               ),
         config.authenticationTimeoutMs,
         requestSignal,
@@ -832,6 +895,10 @@ function validateHttpOptions(
         1,
         MAX_CONFIGURED_CONCURRENCY,
       ),
+      isTrustedProxy: trustedProxyMatcher(
+        parseTrustedProxies(options.trustedProxies),
+      ),
+      preAuthRateLimit: validateRateLimit(options.preAuthRateLimit),
     });
   } catch {
     throw new TypeError(
@@ -931,6 +998,68 @@ function boundedResponse(
       headers,
     }),
     ownsAdmission: true,
+  };
+}
+
+function validateRateLimit(
+  value: DaykeeperMcpHttpBaseOptions["preAuthRateLimit"],
+): ValidatedHttpOptions["preAuthRateLimit"] {
+  if (value === undefined) return undefined;
+  if (
+    !value ||
+    !Number.isInteger(value.burst) ||
+    value.burst < 1 ||
+    value.burst > 10_000 ||
+    typeof value.refillPerSecond !== "number" ||
+    !Number.isFinite(value.refillPerSecond) ||
+    value.refillPerSecond <= 0 ||
+    value.refillPerSecond > 1_000
+  )
+    throw new Error("invalid_rate_limit");
+  return Object.freeze({
+    burst: value.burst,
+    refillPerSecond: value.refillPerSecond,
+  });
+}
+
+const MAX_FAILURE_BUCKETS = 16_384;
+
+/** Lazily refilled token buckets keyed by client address, bounded in size. */
+function createFailureBudget(limit: {
+  readonly burst: number;
+  readonly refillPerSecond: number;
+}) {
+  const buckets = new Map<string, { tokens: number; updated: number }>();
+  const current = (address: string, now: number) => {
+    const bucket = buckets.get(address);
+    if (!bucket) return limit.burst;
+    return Math.min(
+      limit.burst,
+      bucket.tokens + ((now - bucket.updated) / 1_000) * limit.refillPerSecond,
+    );
+  };
+  return {
+    allows(address: string): boolean {
+      return current(address, performance.now()) >= 1;
+    },
+    charge(address: string): void {
+      const now = performance.now();
+      const tokens = Math.max(0, current(address, now) - 1);
+      buckets.delete(address);
+      if (buckets.size >= MAX_FAILURE_BUCKETS) {
+        // Drop buckets that have refilled (they hold no state), then the
+        // least recently charged, so the map stays bounded under a spray of
+        // addresses.
+        for (const [key] of buckets)
+          if (current(key, now) >= limit.burst) buckets.delete(key);
+        while (buckets.size >= MAX_FAILURE_BUCKETS)
+          buckets.delete(buckets.keys().next().value as string);
+      }
+      buckets.set(address, { tokens, updated: now });
+    },
+    retryAfterSeconds(): number {
+      return Math.max(1, Math.ceil(1 / limit.refillPerSecond));
+    },
   };
 }
 

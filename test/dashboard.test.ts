@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 import { validateOptions } from "../src/config.ts";
 import { DASHBOARD_TOOL_NAMES } from "../src/dashboard.ts";
 import {
+  KEEPS_REPLY_KEY_SOURCE,
   DASHBOARD_WIDGET_HTML,
   DASHBOARD_WIDGET_MIME_TYPE,
   DASHBOARD_WIDGET_URI,
@@ -833,4 +834,36 @@ test("a 401 from the API carries the reconnect challenge only when the resource 
   });
   assert.equal(forbidden.isError, true);
   assert.equal(forbidden._meta?.["mcp/www_authenticate"], undefined);
+});
+
+test("the widget releases a reply's key only on a definite refusal", () => {
+  const keepsReplyKey = new Function(
+    `${KEEPS_REPLY_KEY_SOURCE}; return keepsReplyKey;`,
+  )() as (error: unknown) => boolean;
+  // Uncertain: the reply may have been sent, so the same key must be reused.
+  for (const error of [
+    { message: "Timed out" },
+    { code: -32603, message: "Bridge failure" },
+    { message: "No data" },
+    undefined,
+    { refused: true, code: "REQUEST_IN_PROGRESS", message: "in progress" },
+    { refused: true, code: "UPSTREAM_UNAVAILABLE", outcome: "unknown" },
+    { refused: true, code: "REQUEST_OUTCOME_UNKNOWN", outcome: "unknown" },
+  ])
+    assert.equal(keepsReplyKey(error), true, JSON.stringify(error));
+  // Definite refusals: nothing was sent, a new reply gets a new key.
+  for (const error of [
+    { refused: true, code: "SCOPE_NOT_GRANTED", message: "no" },
+    { refused: true, code: "IDEMPOTENCY_KEY_REUSED", message: "reused" },
+    { refused: true, code: "VALIDATION_FAILED", message: "bad" },
+  ])
+    assert.equal(keepsReplyKey(error), false, JSON.stringify(error));
+  // The widget uses exactly this function, and keeps drafts across threads.
+  assert(DASHBOARD_WIDGET_HTML.includes(KEEPS_REPLY_KEY_SOURCE));
+  assert(DASHBOARD_WIDGET_HTML.includes("if(keepsReplyKey(e))"));
+  assert(
+    !/function openThread\(c\)\{[^}]*state\.draft=null/.test(
+      DASHBOARD_WIDGET_HTML,
+    ),
+  );
 });

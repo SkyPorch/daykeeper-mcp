@@ -11,7 +11,9 @@ import {
 export const MAX_INTROSPECTION_RESPONSE_BYTES = 16_384;
 export const DEFAULT_INTROSPECTION_TIMEOUT_MS = 3_000;
 export const MAX_INTROSPECTION_CACHE_SECONDS = 30;
+export const DEFAULT_INTROSPECTION_NEGATIVE_CACHE_SECONDS = 300;
 const MAX_CACHE_ENTRIES = 4_096;
+const MAX_NEGATIVE_CACHE_ENTRIES = 16_384;
 const MAX_IDENTIFIER_BYTES = 256;
 const MAX_SCOPE_COUNT = 64;
 
@@ -31,6 +33,13 @@ export interface DaykeeperIntrospectionVerifierOptions {
   readonly timeoutMs?: number;
   /** Positive-result cache lifetime, 0–30 s, never past `exp`. Default 30. */
   readonly cacheSeconds?: number;
+  /**
+   * How long an `active: false` answer is remembered, 0–3600 s. Default 300.
+   * An inactive token never becomes active again, so repeats of the same
+   * dead or random bearer are refused without another introspection call.
+   * Malformed answers and outages are never cached.
+   */
+  readonly negativeCacheSeconds?: number;
   readonly maxResponseBytes?: number;
   readonly fetch?: typeof globalThis.fetch;
   /** Clock in milliseconds, for tests. */
@@ -65,7 +74,8 @@ class InvalidTokenError extends Error {
  * `createDaykeeperMcpHttpHandler`. Inactive or malformed answers are invalid
  * tokens; a timeout, network failure or unexpected status means verification
  * is unavailable (503), so clients are not sent through re-authorization for
- * an outage. Only positive results are cached, briefly and never past `exp`.
+ * an outage. Positive results are cached briefly and never past `exp`;
+ * `active: false` answers are cached longer, since they are final.
  */
 export function createDaykeeperIntrospectionVerifier(
   options: DaykeeperIntrospectionVerifierOptions,
@@ -75,6 +85,8 @@ export function createDaykeeperIntrospectionVerifier(
     string,
     { readonly auth: DaykeeperMcpVerifiedAuthInfo; readonly until: number }
   >();
+  // sha256(token) -> second until which the token is known inactive.
+  const inactive = new Map<string, number>();
   const now = () => Math.floor(config.now() / 1_000);
 
   const verifyAccessToken = async (
@@ -90,7 +102,25 @@ export function createDaykeeperIntrospectionVerifier(
         return cached.auth;
       cache.delete(key);
     }
+    const knownInactive = inactive.get(key);
+    if (knownInactive !== undefined) {
+      if (knownInactive > now()) throw new InvalidTokenError();
+      inactive.delete(key);
+    }
     const body = await introspect(token, context.signal);
+    if (
+      config.negativeCacheSeconds > 0 &&
+      inactiveResponse.safeParse(body).success
+    ) {
+      if (inactive.size >= MAX_NEGATIVE_CACHE_ENTRIES) {
+        for (const [candidate, until] of inactive)
+          if (until <= now()) inactive.delete(candidate);
+        while (inactive.size >= MAX_NEGATIVE_CACHE_ENTRIES)
+          inactive.delete(inactive.keys().next().value as string);
+      }
+      inactive.set(key, now() + config.negativeCacheSeconds);
+      throw new InvalidTokenError();
+    }
     const auth = toAuthInfo(token, body, config, now());
     if (config.cacheSeconds > 0) {
       const until = Math.min(now() + config.cacheSeconds, auth.expiresAt);
@@ -254,6 +284,7 @@ interface ValidatedConfig {
   readonly issuer: string | undefined;
   readonly timeoutMs: number;
   readonly cacheSeconds: number;
+  readonly negativeCacheSeconds: number;
   readonly maxResponseBytes: number;
   readonly fetch: typeof globalThis.fetch;
   readonly now: () => number;
@@ -323,6 +354,12 @@ function validate(
         MAX_INTROSPECTION_CACHE_SECONDS,
         0,
         MAX_INTROSPECTION_CACHE_SECONDS,
+      ),
+      negativeCacheSeconds: integer(
+        options.negativeCacheSeconds,
+        DEFAULT_INTROSPECTION_NEGATIVE_CACHE_SECONDS,
+        0,
+        3_600,
       ),
       maxResponseBytes: integer(
         options.maxResponseBytes,

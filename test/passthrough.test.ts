@@ -88,6 +88,7 @@ async function connect(
   context: TestContext,
   options: DaykeeperMcpHttpOptions,
   forwardedFor?: string,
+  remoteAddress = "172.18.0.2",
 ) {
   const handler = createDaykeeperMcpHttpHandler(options);
   const transport = new StreamableHTTPClientTransport(RESOURCE, {
@@ -98,7 +99,10 @@ async function connect(
       headers.set("host", RESOURCE.hostname);
       if (forwardedFor !== undefined)
         headers.set("x-forwarded-for", forwardedFor);
-      return handler.fetch(new Request(incoming, { headers }));
+      // As the hosted listener reports it: Caddy's container address.
+      return handler.fetch(new Request(incoming, { headers }), {
+        remoteAddress,
+      });
     },
   });
   const client = new Client(
@@ -552,4 +556,119 @@ test("a token revoked mid-session yields the reconnect challenge on the tool res
     `Bearer resource_metadata="${PRM_URL}", error="invalid_token", error_description="Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."`,
   ]);
   assert(!JSON.stringify(result).includes(BEARER));
+});
+
+test("X-Forwarded-For from an untrusted or unknown peer is ignored", async (context) => {
+  for (const [label, options, remoteAddress] of [
+    ["public peer", passthrough(), "203.0.113.50"],
+    [
+      "peer outside a narrowed list",
+      passthrough({ trustedProxies: ["10.9.0.0/16"] }),
+      "172.18.0.2",
+    ],
+  ] as const) {
+    const api = fakeDaykeeperApi();
+    const client = await connect(
+      context,
+      { ...options, passthrough: { ...options.passthrough, fetch: api.fetch } },
+      "198.51.100.1",
+      remoteAddress,
+    );
+    await client.callTool({ name: "list_workspaces", arguments: {} });
+    assert.equal(api.calls[0]!.forwardedFor, null, label);
+  }
+  // No peer information at all: ignored too.
+  const api = fakeDaykeeperApi();
+  const handler = createDaykeeperMcpHttpHandler(passthrough({}, api.fetch));
+  const request = post(BEARER);
+  request.headers.set("x-forwarded-for", "198.51.100.1");
+  const response = await handler.fetch(request);
+  assert.equal(response.status, 200);
+  await response.body?.cancel();
+  await handler.close();
+  assert.throws(
+    () =>
+      createDaykeeperMcpHttpHandler(passthrough({ trustedProxies: ["caddy"] })),
+    /Invalid Daykeeper MCP HTTP configuration/,
+  );
+});
+
+test("random-bearer floods spend a per-address budget and stop reaching the verifier", async () => {
+  let verified = 0;
+  const handler = createDaykeeperMcpHttpHandler(
+    passthrough({
+      preAuthRateLimit: { burst: 3, refillPerSecond: 0.001 },
+      verifier: {
+        verifyAccessToken: async (token) => {
+          verified++;
+          if (token !== BEARER) throw new Error("inactive");
+          return auth(token);
+        },
+      },
+    }),
+  );
+  const from = (address: string, token: string, forwarded?: string) => {
+    const request = post(token);
+    if (forwarded) request.headers.set("x-forwarded-for", forwarded);
+    return handler.fetch(request, { remoteAddress: address });
+  };
+  // Behind Caddy, the budget is keyed by the forwarded client address.
+  const statuses: number[] = [];
+  for (let attempt = 0; attempt < 6; attempt++)
+    statuses.push(
+      (
+        await from(
+          "172.18.0.2",
+          `dk_oat_random_${attempt}_padding_000000`,
+          "203.0.113.7",
+        )
+      ).status,
+    );
+  assert.deepEqual(statuses, [401, 401, 401, 429, 429, 429]);
+  assert.equal(verified, 3);
+  const limited = await from(
+    "172.18.0.2",
+    "dk_oat_random_x_padding_0000000",
+    "203.0.113.7",
+  );
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "1000");
+  assert.equal(verified, 3);
+  // Another client behind the same proxy is unaffected, and valid bearers
+  // spend nothing.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const ok = await from("172.18.0.2", BEARER, "198.51.100.20");
+    assert.equal(ok.status, 200);
+    await ok.body?.cancel();
+  }
+  const bad = await from(
+    "172.18.0.2",
+    "dk_oat_random_y_padding_0000000",
+    "198.51.100.20",
+  );
+  assert.equal(bad.status, 401);
+  // A direct, untrusted peer is keyed by its socket address, so it cannot
+  // borrow another client's budget by forging the header.
+  const direct = await from(
+    "198.51.100.99",
+    "dk_oat_random_z_padding_0000000",
+    "198.51.100.20",
+  );
+  assert.equal(direct.status, 401);
+  // Requests without a bearer never spend the budget either.
+  for (let attempt = 0; attempt < 5; attempt++)
+    assert.equal(
+      (await handler.fetch(post(), { remoteAddress: "172.18.0.2" })).status,
+      401,
+    );
+  await handler.close();
+  for (const preAuthRateLimit of [
+    { burst: 0, refillPerSecond: 1 },
+    { burst: 3, refillPerSecond: 0 },
+    { burst: 3, refillPerSecond: Number.POSITIVE_INFINITY },
+  ])
+    assert.throws(
+      () => createDaykeeperMcpHttpHandler(passthrough({ preAuthRateLimit })),
+      /Invalid Daykeeper MCP HTTP configuration/,
+    );
 });

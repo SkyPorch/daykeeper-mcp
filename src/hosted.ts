@@ -11,6 +11,7 @@ import {
   type DaykeeperMcpHttpHandler,
 } from "./http.ts";
 import { createDaykeeperIntrospectionVerifier } from "./introspection.ts";
+import { parseTrustedProxies } from "./clientAddress.ts";
 
 /** The five scopes Daykeeper's OAuth server grants to ChatGPT connections. */
 export const DAYKEEPER_DASHBOARD_SCOPES = Object.freeze([
@@ -27,7 +28,15 @@ export const DEFAULT_MCP_ALLOWED_ORIGINS = Object.freeze([
 ]);
 /** The compose service name of the Daykeeper API on the private network. */
 export const DEFAULT_MCP_INTERNAL_HOSTNAMES = Object.freeze(["daykeeper-api"]);
-const SHUTDOWN_GRACE_MS = 10_000;
+export const SHUTDOWN_GRACE_MS = 10_000;
+/**
+ * Failed-authentication budget per client address: 30 refusals, then one per
+ * two seconds. Valid bearers spend nothing (see `preAuthRateLimit`).
+ */
+export const PRE_AUTH_RATE_LIMIT = Object.freeze({
+  burst: 30,
+  refillPerSecond: 0.5,
+});
 
 export interface DaykeeperMcpHostedConfig {
   readonly port: number;
@@ -41,6 +50,8 @@ export interface DaykeeperMcpHostedConfig {
   readonly issuer: string;
   /** `_meta.ui.domain`: required by OpenAI to submit a plugin with UI. */
   readonly widgetDomain: string;
+  /** Peers allowed to set X-Forwarded-For (Caddy's network). */
+  readonly trustedProxies: readonly string[];
 }
 
 export interface DaykeeperMcpHttpServerHandle {
@@ -119,6 +130,9 @@ export function readHostedEnvironment(
     introspectionSecret: required("DAYKEEPER_OAUTH_INTROSPECTION_SECRET"),
     issuer,
     widgetDomain,
+    trustedProxies: parseTrustedProxies(
+      environment.DAYKEEPER_MCP_TRUSTED_PROXIES,
+    ),
   });
 }
 
@@ -135,6 +149,8 @@ export async function startDaykeeperMcpHttpServer(
     /** Test seam: transport for introspection and API calls. */
     readonly fetch?: typeof globalThis.fetch;
     readonly onerror?: (message: string) => void;
+    /** Test seam: how long shutdown waits for in-flight requests. */
+    readonly shutdownGraceMs?: number;
   } = {},
 ): Promise<DaykeeperMcpHttpServerHandle> {
   const config = readHostedEnvironment(environment);
@@ -165,18 +181,44 @@ export async function startDaykeeperMcpHttpServer(
     allowedOrigins: config.allowedOrigins,
     scopesSupported: [...DAYKEEPER_DASHBOARD_SCOPES],
     serviceDocumentationUrl: new URL("https://www.mydaykeeper.com/docs"),
+    trustedProxies: config.trustedProxies,
+    preAuthRateLimit: PRE_AUTH_RATE_LIMIT,
     onerror: options.onerror,
   });
 
   const sockets = new Set<import("node:net").Socket>();
+  let draining = false;
+  let inFlight = 0;
+  let drained: (() => void) | undefined;
   const server = createServer((request, response) => {
-    void serve(handler, config.resourceUrl, request, response).catch(() => {
-      options.onerror?.("Daykeeper MCP HTTP request failed.");
-      if (!response.headersSent) {
-        response.writeHead(500, { "cache-control": "no-store" });
-      }
+    if (draining) {
+      // A request on a kept-alive connection after shutdown began.
+      response.writeHead(503, {
+        "cache-control": "no-store",
+        connection: "close",
+        "retry-after": "1",
+      });
       response.end();
-    });
+      return;
+    }
+    inFlight++;
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      inFlight--;
+      if (inFlight === 0) drained?.();
+    };
+    response.once("close", settle);
+    void serve(handler, config.resourceUrl, request, response)
+      .catch(() => {
+        options.onerror?.("Daykeeper MCP HTTP request failed.");
+        if (!response.headersSent) {
+          response.writeHead(500, { "cache-control": "no-store" });
+        }
+        response.end();
+      })
+      .finally(settle);
   });
   server.requestTimeout = 75_000;
   server.headersTimeout = 15_000;
@@ -195,20 +237,30 @@ export async function startDaykeeperMcpHttpServer(
   const bound = server.address() as AddressInfo;
   const host = bound.family === "IPv6" ? `[${bound.address}]` : bound.address;
 
+  const graceMs = options.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
   let closing: Promise<void> | undefined;
+  // Graceful: stop accepting, let in-flight requests (a send in progress)
+  // finish for up to the grace period, and only then cancel what is left.
   const close = () =>
     (closing ??= (async () => {
+      draining = true;
       const stopped = new Promise<void>((resolve) =>
         server.close(() => resolve()),
       );
       server.closeIdleConnections();
+      if (inFlight > 0)
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, graceMs);
+          timer.unref();
+          drained = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
       await handler.close();
-      const timer = setTimeout(() => {
-        for (const socket of sockets) socket.destroy();
-      }, SHUTDOWN_GRACE_MS);
-      timer.unref();
+      server.closeIdleConnections();
+      for (const socket of sockets) socket.destroy();
       await stopped;
-      clearTimeout(timer);
     })());
 
   return Object.freeze({
@@ -237,8 +289,21 @@ async function serve(
     response.end(request.method === "HEAD" ? undefined : "ok\n");
     return;
   }
-  // Origin-form only: an absolute-form target could name another origin.
-  if (!path.startsWith("/") || path.startsWith("//")) {
+  // Origin-form only: an absolute-form, scheme-relative or backslash target
+  // could resolve to another origin, so it never reaches the handler.
+  let target: URL | undefined;
+  try {
+    target = new URL(path, resourceUrl.origin);
+  } catch {
+    target = undefined;
+  }
+  if (
+    !path.startsWith("/") ||
+    path.startsWith("//") ||
+    path.includes("\\") ||
+    !target ||
+    target.origin !== resourceUrl.origin
+  ) {
     response.writeHead(400, { "cache-control": "no-store" });
     response.end();
     return;
@@ -256,7 +321,7 @@ async function serve(
   }
   const method = request.method ?? "GET";
   const hasBody = method !== "GET" && method !== "HEAD";
-  const fetchRequest = new Request(new URL(path, resourceUrl.origin), {
+  const fetchRequest = new Request(target, {
     method,
     headers,
     body: hasBody
@@ -265,7 +330,9 @@ async function serve(
     signal: controller.signal,
     ...(hasBody ? { duplex: "half" } : {}),
   } as RequestInit);
-  const answer = await handler.fetch(fetchRequest);
+  const answer = await handler.fetch(fetchRequest, {
+    remoteAddress: request.socket.remoteAddress,
+  });
   const outgoing: Record<string, string | string[]> = {};
   answer.headers.forEach((value, name) => {
     outgoing[name] = value;

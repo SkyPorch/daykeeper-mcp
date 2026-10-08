@@ -125,9 +125,24 @@ th{font-weight:500;color:var(--muted)}
 }
 `;
 
+/**
+ * Whether a failed send must keep its idempotency key (and draft). Only a
+ * tool result that is an error, carries no unknown outcome and is not
+ * REQUEST_IN_PROGRESS is a definite refusal; everything else (timeouts,
+ * bridge errors, missing data) may have sent the reply. Plain ES5, embedded
+ * verbatim in the widget and evaluated directly by tests.
+ */
+export const KEEPS_REPLY_KEY_SOURCE = `function keepsReplyKey(e){
+ if(!e||e.refused!==true)return true;
+ if(e.outcome)return true;
+ if(e.code==="REQUEST_IN_PROGRESS")return true;
+ return false;
+}`;
+
 const SCRIPT = `
 (function(){
 "use strict";
+${KEEPS_REPLY_KEY_SOURCE}
 var state={data:null,workspaceId:null,tab:"inbox",filter:"open",list:[],cursor:null,selected:null,thread:[],threadCursor:null,email:null,draft:null,busy:false};
 var pending=new Map();var nextId=1;var bridge=false;
 function $(id){return document.getElementById(id)}
@@ -143,7 +158,7 @@ function callTool(name,args){
 function result(r){
  if(!r)throw {message:"No response"};
  var s=r.structuredContent;
- if(r.isError){var e=(s&&s.error)||{};throw {message:e.message||"Failed",outcome:e.outcome,idempotencyKey:e.idempotencyKey}}
+ if(r.isError){var e=(s&&s.error)||{};throw {refused:true,code:e.code,message:e.message||"Failed",outcome:e.outcome,idempotencyKey:e.idempotencyKey}}
  if(!s)throw {message:"No data"};
  return s;
 }
@@ -192,7 +207,7 @@ function loadList(append){
  callTool("list_conversations",args).then(result).then(function(s){state.list=append?state.list.concat(s.conversations):s.conversations;state.cursor=s.nextCursor;renderList()}).catch(function(e){$("list-empty").hidden=false;$("list-empty").textContent=e.message||"Failed"}).then(function(){$("more").disabled=false});
 }
 function openThread(c){
- state.selected=c;state.thread=[];state.threadCursor=null;state.draft=null;
+ state.selected=c;state.thread=[];state.threadCursor=null;
  $("split").classList.add("show-thread");$("thread-empty").hidden=true;$("thread-body").hidden=false;
  $("thread-title").textContent="#"+c.id;$("reply").value="";setStatus("send-status","");
  updateResolve();renderList();loadThread(false);
@@ -226,7 +241,9 @@ function sendReply(){
  callTool("send_reply",{workspaceId:state.workspaceId,conversationId:c.id,content:text,idempotencyKey:state.draft.key}).then(result).then(function(s){
   state.draft=null;$("reply").value="";setStatus("send-status","Sent");state.thread=state.thread.concat([s.message]);renderThread();
  }).catch(function(e){
-  if(e.outcome==="unknown")setStatus("send-status","Not confirmed. Check before resending.",true);
+  // Only a definite refusal releases the key. A timeout, a bridge failure,
+  // an in-progress send or an unknown outcome keeps it for the retry.
+  if(keepsReplyKey(e))setStatus("send-status","Not confirmed. Check before resending.",true);
   else{state.draft=null;setStatus("send-status",e.message||"Not sent",true)}
  }).then(function(){state.busy=false;$("send").disabled=false});
 }

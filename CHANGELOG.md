@@ -33,8 +33,22 @@
   `_meta["mcp/www_authenticate"]` (`error="invalid_token"` plus
   `error_description`), so ChatGPT prompts the person to reconnect.
 
+- Introspection remembers `active: false` answers for 5 minutes (bounded,
+  keyed by token digest); malformed answers and outages are never cached.
+- `preAuthRateLimit`: a per-client-address budget for failed authentications,
+  checked before the verifier, so random-bearer floods never reach
+  introspection. The hosted server enables it (30, then one per 2 s).
+- `trustedProxies` / `DAYKEEPER_MCP_TRUSTED_PROXIES`: `X-Forwarded-For` is
+  honoured only from these peers (default private ranges and loopback).
+
 ### Changed
 
+- The hosted server drains on shutdown: it stops accepting, waits up to 10 s
+  for in-flight requests, then cancels the rest. Request targets containing
+  `\` or resolving to another origin are refused.
+- The dashboard UI keeps a reply's idempotency key after any uncertain
+  failure (timeout, bridge error, `REQUEST_IN_PROGRESS`, unknown outcome) and
+  releases it only on success or a definite refusal.
 - The hosted entrypoint requires `DAYKEEPER_MCP_WIDGET_DOMAIN` (OpenAI
   requires `_meta.ui.domain` to submit a plugin with UI).
 - `list_conversations` accepts `open`, `resolved`, `pending`, `snoozed` or

@@ -116,21 +116,27 @@ endpoint behind `https://api.mydaykeeper.com/mcp`. Daykeeper's own OAuth server
 issues the bearer; this host verifies it by introspection on the private
 network and passes the same token through to the `/v1` API.
 
-| Variable                               | Default               |                                                                                                       |
-| -------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- |
-| `DAYKEEPER_MCP_RESOURCE_URL`           | required              | e.g. `https://api.mydaykeeper.com/mcp`                                                                |
-| `DAYKEEPER_INTERNAL_API_URL`           | required              | e.g. `http://daykeeper-api:4100`                                                                      |
-| `DAYKEEPER_OAUTH_ISSUER`               | required              | `https://api.mydaykeeper.com`, no trailing slash                                                      |
-| `DAYKEEPER_OAUTH_INTROSPECTION_SECRET` | required              | bearer for `POST /oauth/introspect`                                                                   |
-| `DAYKEEPER_MCP_HTTP_PORT`              | `4108`                |                                                                                                       |
-| `DAYKEEPER_MCP_HTTP_HOST`              | `0.0.0.0`             |                                                                                                       |
-| `DAYKEEPER_MCP_ALLOWED_HOSTNAMES`      | resource host         | comma list                                                                                            |
-| `DAYKEEPER_MCP_ALLOWED_ORIGINS`        | `https://chatgpt.com` | comma list                                                                                            |
-| `DAYKEEPER_MCP_INTERNAL_HOSTNAMES`     | `daykeeper-api`       | the only hosts reachable over plain HTTP                                                              |
-| `DAYKEEPER_MCP_WIDGET_DOMAIN`          | required              | `_meta.ui.domain`: a dedicated HTTPS origin for this plugin, e.g. `https://dashboard.mydaykeeper.com` |
+| Variable                               | Default                   |                                                                                                       |
+| -------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DAYKEEPER_MCP_RESOURCE_URL`           | required                  | e.g. `https://api.mydaykeeper.com/mcp`                                                                |
+| `DAYKEEPER_INTERNAL_API_URL`           | required                  | e.g. `http://daykeeper-api:4100`                                                                      |
+| `DAYKEEPER_OAUTH_ISSUER`               | required                  | `https://api.mydaykeeper.com`, no trailing slash                                                      |
+| `DAYKEEPER_OAUTH_INTROSPECTION_SECRET` | required                  | bearer for `POST /oauth/introspect`                                                                   |
+| `DAYKEEPER_MCP_HTTP_PORT`              | `4108`                    |                                                                                                       |
+| `DAYKEEPER_MCP_HTTP_HOST`              | `0.0.0.0`                 |                                                                                                       |
+| `DAYKEEPER_MCP_ALLOWED_HOSTNAMES`      | resource host             | comma list                                                                                            |
+| `DAYKEEPER_MCP_ALLOWED_ORIGINS`        | `https://chatgpt.com`     | comma list                                                                                            |
+| `DAYKEEPER_MCP_INTERNAL_HOSTNAMES`     | `daykeeper-api`           | the only hosts reachable over plain HTTP                                                              |
+| `DAYKEEPER_MCP_WIDGET_DOMAIN`          | required                  | `_meta.ui.domain`: a dedicated HTTPS origin for this plugin, e.g. `https://dashboard.mydaykeeper.com` |
+| `DAYKEEPER_MCP_TRUSTED_PROXIES`        | private ranges + loopback | peers (Caddy) allowed to set `X-Forwarded-For`; malformed entries refuse to start                     |
 
-It forwards the proxy's `X-Forwarded-For` (bare IP literals only, at most 8)
-to the internal API so per-client rate limits apply; exchange mode never does.
+It honours `X-Forwarded-For` only from a trusted proxy peer and forwards that
+validated chain (bare IP literals only, at most 8) to the internal API so
+per-client rate limits apply; exchange mode never does. Failed authentications
+spend a per-client budget (30, then one per 2 s) checked before introspection,
+and introspection remembers `active: false` answers for 5 minutes. Shutdown
+stops accepting, lets in-flight requests finish for up to 10 s, then cancels
+the rest.
 A tool whose API call returns 401 carries `_meta["mcp/www_authenticate"]` so
 ChatGPT asks the person to reconnect.
 

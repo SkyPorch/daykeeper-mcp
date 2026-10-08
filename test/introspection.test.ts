@@ -162,13 +162,13 @@ test("timeouts, failures, odd statuses and oversized answers mean verification i
   }
 });
 
-test("positive results are cached briefly and never past expiry; negatives are not cached", async () => {
+test("positive results are cached briefly and never past expiry", async () => {
   let clock = 1_000_000_000_000;
   const now = () => Math.floor(clock / 1_000);
-  let exp = now() + 1_800;
-  let answer: unknown = active(now(), { exp });
+  let answer: unknown = active(now(), { exp: now() + 1_800 });
   const { instance, requests } = verifier(() => Response.json(answer), {
     now: () => clock,
+    negativeCacheSeconds: 0,
   });
   await instance.verifyAccessToken(TOKEN, context());
   await instance.verifyAccessToken(TOKEN, context());
@@ -179,12 +179,12 @@ test("positive results are cached briefly and never past expiry; negatives are n
   clock += 2_000;
   answer = { active: false };
   await assert.rejects(instance.verifyAccessToken(TOKEN, context()));
+  // With the negative cache off, every inactive answer is asked again.
   await assert.rejects(instance.verifyAccessToken(TOKEN, context()));
   assert.equal(requests.length, 3);
 
   // A token expiring in 5 s is cached for at most those 5 s.
-  exp = now() + 5;
-  answer = active(now(), { exp });
+  answer = active(now(), { exp: now() + 5 });
   await instance.verifyAccessToken(TOKEN, context());
   clock += 6_000;
   answer = { active: false };
@@ -195,6 +195,41 @@ test("positive results are cached briefly and never past expiry; negatives are n
   answer = active(now());
   await instance.verifyAccessToken(`${TOKEN}B`, context());
   assert.equal(requests.length, 6);
+});
+
+test("inactive answers are remembered for five minutes; malformed answers and outages are not", async () => {
+  let clock = 1_000_000_000_000;
+  const now = () => Math.floor(clock / 1_000);
+  let answer: () => Response = () => Response.json({ active: false });
+  const { instance, requests } = verifier(() => answer(), {
+    now: () => clock,
+  });
+  for (let attempt = 0; attempt < 5; attempt++)
+    await assert.rejects(instance.verifyAccessToken(TOKEN, context()));
+  assert.equal(requests.length, 1);
+  // Even if the server would now say active, the dead token stays refused
+  // until the entry expires: an inactive token never becomes active again.
+  answer = () => Response.json(active(now()));
+  clock += 299_000;
+  await assert.rejects(instance.verifyAccessToken(TOKEN, context()));
+  assert.equal(requests.length, 1);
+  clock += 2_000;
+  await instance.verifyAccessToken(TOKEN, context());
+  assert.equal(requests.length, 2);
+  // Another token is unaffected by this token's entry.
+  await instance.verifyAccessToken(`${TOKEN}C`, context());
+  assert.equal(requests.length, 3);
+
+  for (const failure of [
+    () => Response.json({ active: "false" }),
+    () => new Response("down", { status: 503 }),
+  ]) {
+    answer = failure;
+    const token = `${TOKEN}${requests.length}`;
+    await assert.rejects(instance.verifyAccessToken(token, context()));
+    await assert.rejects(instance.verifyAccessToken(token, context()));
+  }
+  assert.equal(requests.length, 7);
 });
 
 test("caching can be disabled", async () => {
@@ -232,6 +267,8 @@ test("configuration allows plain HTTP only to loopback or an allowlisted interna
     { clientSecret: `${SECRET} with space` },
     { timeoutMs: 60_000 },
     { cacheSeconds: 31 },
+    { negativeCacheSeconds: 3_601 },
+    { negativeCacheSeconds: -1 },
     { issuer: "http://api.mydaykeeper.com" },
   ])
     assert.throws(

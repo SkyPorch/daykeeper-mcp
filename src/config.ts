@@ -33,11 +33,31 @@ interface DaykeeperMcpBaseOptions {
    * guess. This never grants anything: the API remains the authority.
    */
   scopes?: readonly string[];
+  /**
+   * Replace the general tool catalog with a fixed product profile. The
+   * "dashboard" profile exposes exactly the ten Daykeeper Dashboard tools and
+   * ignores every other feature gate. Omitted keeps the general catalog.
+   */
+  toolProfile?: DaykeeperMcpToolProfile;
+  /**
+   * Dashboard profile only: the dedicated HTTPS origin ChatGPT renders the
+   * dashboard UI under (`_meta.ui.domain`). Omitted leaves the host default.
+   */
+  dashboardWidgetDomain?: string;
+  /**
+   * Exact private-network hostnames (for example a container service name)
+   * that may be reached over plain HTTP. Loopback is always allowed. Hosted
+   * entrypoints set this; it is not read from the stdio environment.
+   */
+  internalHttpHostnames?: readonly string[];
   fetch?: typeof globalThis.fetch;
 }
 
+export type DaykeeperMcpToolProfile = "dashboard";
+
 // Matches the scope names published by the management SDK contract.
-const SCOPE_PATTERN = /^daykeeper\.[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/;
+export const SCOPE_PATTERN =
+  /^daykeeper\.[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/;
 const MAX_SCOPES = 32;
 
 export type DaykeeperMcpOptions = DaykeeperMcpBaseOptions &
@@ -70,6 +90,9 @@ export interface DaykeeperMcpConfig {
   readonly enableOperatorWrites: boolean;
   /** Undefined when the operator declared no scope list. */
   readonly scopes: readonly string[] | undefined;
+  /** "general" is the gated catalog; "dashboard" is the fixed ChatGPT set. */
+  readonly toolProfile: "general" | DaykeeperMcpToolProfile;
+  readonly dashboardWidgetDomain: string | undefined;
 }
 
 export function validateOptions(
@@ -84,8 +107,12 @@ export function validateOptions(
     const url = new URL(options.baseUrl);
     // These are the loopback hosts supported by the pinned management SDK.
     const loopback = ["localhost", "127.0.0.1"].includes(url.hostname);
+    const internal = normalizeInternalHostnames(
+      options.internalHttpHostnames,
+    ).includes(url.hostname);
     if (
-      (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+      (url.protocol !== "https:" &&
+        !(url.protocol === "http:" && (loopback || internal))) ||
       url.username ||
       url.password ||
       url.search ||
@@ -122,6 +149,20 @@ export function validateOptions(
         throw invalidConfig();
     }
     const scopes = normalizeScopes(options.scopes);
+    if (
+      options.toolProfile !== undefined &&
+      options.toolProfile !== "dashboard"
+    )
+      throw invalidConfig();
+    const widgetDomain = options.dashboardWidgetDomain;
+    if (
+      widgetDomain !== undefined &&
+      (typeof widgetDomain !== "string" ||
+        options.toolProfile !== "dashboard" ||
+        new URL(widgetDomain).protocol !== "https:" ||
+        new URL(widgetDomain).origin !== widgetDomain)
+    )
+      throw invalidConfig();
     return Object.freeze({
       baseUrl: url.href.replace(/\/$/, ""),
       accessToken: credential,
@@ -136,6 +177,8 @@ export function validateOptions(
       enableOperatorTools: options.enableOperatorTools ?? false,
       enableOperatorWrites: options.enableOperatorWrites ?? false,
       scopes,
+      toolProfile: options.toolProfile ?? "general",
+      dashboardWidgetDomain: widgetDomain,
     });
   } catch {
     throw invalidConfig();
@@ -194,6 +237,30 @@ export function readEnvironment(
     enableOperatorWrites: config.enableOperatorWrites,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
+}
+
+const INTERNAL_HOSTNAME =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+/**
+ * Exact lowercase DNS names only: no IP literals, ports, wildcards or
+ * loopback aliases. An empty or omitted list allows nothing beyond loopback.
+ */
+export function normalizeInternalHostnames(
+  hostnames: readonly string[] | undefined,
+): readonly string[] {
+  if (hostnames === undefined) return Object.freeze([]);
+  if (!Array.isArray(hostnames) || hostnames.length > 16) throw invalidConfig();
+  for (const hostname of hostnames) {
+    if (
+      typeof hostname !== "string" ||
+      hostname.length > 253 ||
+      !INTERNAL_HOSTNAME.test(hostname) ||
+      /^[0-9.]+$/.test(hostname)
+    )
+      throw invalidConfig();
+  }
+  return Object.freeze([...new Set(hostnames)]);
 }
 
 function normalizeScopes(

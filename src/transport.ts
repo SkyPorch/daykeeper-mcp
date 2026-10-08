@@ -7,9 +7,28 @@ import {
   MAX_RESPONSE_BYTES,
   type DaykeeperMcpConfig,
 } from "./config.ts";
-import { McpAdapterError, safeError } from "./errors.ts";
+import { createDashboardApi } from "./dashboardApi.ts";
+import { McpAdapterError, safeError, type SafeError } from "./errors.ts";
 import { outputSchema } from "./schemas.ts";
 import { toolEnabled, type Execute, type ToolMetadata } from "./tools.ts";
+
+/**
+ * The pinned SDK only accepts HTTPS (or loopback HTTP) base URLs. A hosted
+ * deployment may reach the API over a private network by an explicitly
+ * allowlisted service name (validated in config.ts). The SDK is then given the
+ * same host and path under https, and the bounded transport below maps that
+ * one origin back to the configured http origin. Nothing else is rewritten.
+ */
+function sdkBaseUrl(baseUrl: string): { sdk: string; dispatchOrigin: string } {
+  const url = new URL(baseUrl);
+  const loopback = ["localhost", "127.0.0.1"].includes(url.hostname);
+  if (url.protocol !== "http:" || loopback)
+    return { sdk: baseUrl, dispatchOrigin: url.origin };
+  const virtual = new URL(baseUrl);
+  virtual.protocol = "https:";
+  if (url.port === "") virtual.port = "80";
+  return { sdk: virtual.href.replace(/\/$/, ""), dispatchOrigin: url.origin };
+}
 
 export function createExecutor(
   config: DaykeeperMcpConfig,
@@ -77,22 +96,31 @@ export function createExecutor(
         );
       inFlight++;
       admitted = true;
+      const target = sdkBaseUrl(config.baseUrl);
+      const sdkOrigin = new URL(target.sdk).origin;
       const fetch: typeof globalThis.fetch = async (url, init) => {
         try {
           assertActive();
           const actual = new URL(
             typeof url === "string" || url instanceof URL ? url : url.url,
           );
-          if (actual.origin !== new URL(config.baseUrl).origin)
+          if (actual.origin !== sdkOrigin)
             throw new McpAdapterError(
               "INVALID_REQUEST_TARGET",
               "The SDK request did not target the configured API origin.",
             );
+          const destination =
+            sdkOrigin === target.dispatchOrigin
+              ? url
+              : new URL(
+                  `${actual.pathname}${actual.search}`,
+                  target.dispatchOrigin,
+                );
           // A static credential and a dispatch guard avoid any late request after
           // the caller has cancelled. The SDK cannot redirect or replay a write.
           requestSent = true;
           const pending = Promise.resolve(
-            transport(url, {
+            transport(destination, {
               ...init,
               signal: controller.signal,
               redirect: "error",
@@ -137,12 +165,17 @@ export function createExecutor(
         }
       };
       const client = new DaykeeperClient({
-        baseUrl: config.baseUrl,
+        baseUrl: target.sdk,
         token: config.accessToken,
         timeoutMs: config.timeoutMs,
         fetch,
       });
-      const data = await abortable(work(client), controller.signal);
+      const api = createDashboardApi({
+        baseUrl: target.sdk,
+        token: config.accessToken,
+        fetch,
+      });
+      const data = await abortable(work(client, api), controller.signal);
       assertActive();
       if (
         !data ||
@@ -156,6 +189,8 @@ export function createExecutor(
           "INVALID_API_RESPONSE",
           "The API did not return the expected JSON object or resource list.",
         );
+      if (metadata.profile === "dashboard")
+        return dashboardResult(metadata, config.accessToken, data as object);
       return result(metadata, config.accessToken, { ok: true, data });
     } catch (error) {
       const details = safeError(
@@ -210,6 +245,8 @@ export function createExecutor(
             "use_a_fresh_key_only_for_a_different_request",
           ]),
         ];
+      if (metadata.profile === "dashboard")
+        return dashboardError(metadata, config.accessToken, details, input);
       return result(metadata, config.accessToken, {
         ok: false,
         error: details,
@@ -282,6 +319,67 @@ function result(
     content: [{ type: "text", text }],
     structuredContent,
   };
+}
+
+/**
+ * Dashboard tools answer with their own flat, per-tool structured content so
+ * ChatGPT and the dashboard UI read the fields directly. The access token is
+ * redacted from both representations, as in the general envelope.
+ */
+function dashboardResult(
+  metadata: ToolMetadata,
+  secret: string,
+  data: object,
+): CallToolResult {
+  const text = redact(JSON.stringify(data), secret);
+  return {
+    content: [{ type: "text", text }],
+    structuredContent: JSON.parse(text) as Record<string, unknown>,
+  };
+}
+
+function dashboardError(
+  metadata: ToolMetadata,
+  secret: string,
+  details: SafeError,
+  input: unknown,
+): CallToolResult {
+  const unknown = details.mutationOutcome === "unknown";
+  // A send's key is minted before dispatch, so it can always be handed back:
+  // the only safe retry of an uncertain send reuses that exact key.
+  const key =
+    metadata.requiresIdempotencyKey &&
+    input &&
+    typeof input === "object" &&
+    "idempotencyKey" in input &&
+    typeof input.idempotencyKey === "string" &&
+    /^[A-Za-z0-9._:-]{16,128}$/.test(input.idempotencyKey)
+      ? input.idempotencyKey
+      : undefined;
+  const error = {
+    code: details.code,
+    message: unknown
+      ? key
+        ? `The ${metadata.name === "send_reply" ? "reply may already have been sent" : "change may already have been made"}. Check the current state before trying again. To retry, repeat the call with idempotencyKey "${key}"; never with a new key.`
+        : "The change may already have been made. Check the current state before trying again."
+      : details.message,
+    retryable: unknown ? false : details.retryable,
+    ...(details.status === undefined ? {} : { status: details.status }),
+    ...(unknown ? { outcome: "unknown" as const } : {}),
+    ...(key ? { idempotencyKey: key } : {}),
+    nextActions: details.nextActions,
+    ...(details.correlationId ? { correlationId: details.correlationId } : {}),
+  };
+  const text = redact(JSON.stringify({ tool: metadata.name, error }), secret);
+  return {
+    isError: true,
+    content: [{ type: "text", text }],
+    structuredContent: JSON.parse(text) as Record<string, unknown>,
+  };
+}
+
+function redact(text: string, secret: string): string {
+  return text.split(JSON.stringify(secret).slice(1, -1)).join("[REDACTED]");
 }
 
 async function readBody(

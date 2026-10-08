@@ -26,12 +26,18 @@ export type {
 } from "./http.ts";
 
 export {
+  DASHBOARD_WIDGET_MIME_TYPE,
+  DASHBOARD_WIDGET_URI,
+} from "./dashboardWidget.ts";
+export { DASHBOARD_TOOL_NAMES } from "./dashboard.ts";
+
+export {
   readEnvironment,
   MCP_VERSION,
   SDK_VERSION,
   ENVELOPE_VERSION,
 } from "./config.ts";
-export type { DaykeeperMcpOptions } from "./config.ts";
+export type { DaykeeperMcpOptions, DaykeeperMcpToolProfile } from "./config.ts";
 
 /** One local stdio instance per configured credential. This is not an HTTP authentication gateway. */
 export function createDaykeeperMcpServer(

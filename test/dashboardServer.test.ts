@@ -422,7 +422,16 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
   );
   assert.match(challenge?.[0] ?? "", /error="invalid_token"/);
   assert.match(challenge?.[0] ?? "", /error_description="[^"]+"/);
-  assert.match(challenge?.[0] ?? "", /Connect Daykeeper to continue/);
+  assert.match(
+    challenge?.[0] ?? "",
+    /Create your Daykeeper account or connect an existing account to continue/,
+  );
+  assert.equal(
+    unauthorized.content?.[0]?.type === "text"
+      ? unauthorized.content[0].text
+      : "",
+    "Create your Daykeeper account or connect an existing account to continue.",
+  );
   const challengeDescription =
     /error_description="([^"]+)"/.exec(challenge?.[0] ?? "")?.[1] ?? "";
   assert.doesNotMatch(challengeDescription, /https?:\/\//i);

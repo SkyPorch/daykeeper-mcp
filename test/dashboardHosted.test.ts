@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createDashboardHostedHandler } from "../src/dashboardHosted.ts";
 
+const welcomeMessage =
+  "Welcome to Daykeeper! Customer live chat for small teams in the age of AI. Create your account or connect your existing account to get started.";
+
 function mcpRequest(
   method: string,
   id?: number,
@@ -128,7 +131,8 @@ test("signed-out dashboard supports discovery and data-free profile/read/write c
   assert.equal(challenge.status, 200);
   const toolError = (await responseMessage(challenge)).result;
   assert.equal(toolError.isError, true);
-  assert.match(toolError.content[0].text, /Connect Daykeeper/);
+  assert.equal(toolError.structuredContent, undefined);
+  assert.equal(toolError.content[0].text, welcomeMessage);
   assert.match(
     toolError._meta["mcp/www_authenticate"][0],
     /resource_metadata="https:\/\/dashboard\.example\.test\//,
@@ -144,7 +148,7 @@ test("signed-out dashboard supports discovery and data-free profile/read/write c
   assert.equal(readChallenge.status, 200);
   assert.equal(readError.isError, true);
   assert.equal(readError.structuredContent, undefined);
-  assert.match(readError.content[0].text, /Connect Daykeeper/);
+  assert.equal(readError.content[0].text, welcomeMessage);
   assert.match(
     readError._meta["mcp/www_authenticate"][0],
     /scope="daykeeper\.accounts:read daykeeper\.conversations:read"/,
@@ -210,7 +214,7 @@ test("an inactive token falls back to a data-free tool sign-in challenge", async
   const result = (await responseMessage(response)).result;
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent, undefined);
-  assert.match(result.content[0].text, /Connect Daykeeper/);
+  assert.equal(result.content[0].text, welcomeMessage);
   assert.ok(result._meta["mcp/www_authenticate"][0].includes("invalid_token"));
   assert.equal(introspections, 1);
 });

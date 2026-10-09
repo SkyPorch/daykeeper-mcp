@@ -219,6 +219,154 @@ test("an inactive token falls back to a data-free tool sign-in challenge", async
   assert.equal(introspections, 1);
 });
 
+test("authenticated startup discovery is static during a concurrent host burst", async (context) => {
+  let introspections = 0;
+  let exchanges = 0;
+  let profileReads = 0;
+  context.mock.method(
+    globalThis,
+    "fetch",
+    async (input: Parameters<typeof fetch>[0]) => {
+      const path = new URL(input instanceof Request ? input.url : String(input))
+        .pathname;
+      assert.equal(path, "/v1/profile");
+      profileReads++;
+      return Response.json({
+        data: {
+          userId: "33333333-3333-4333-8333-333333333333",
+          name: "Alex",
+          email: "alex@example.test",
+          organizationId: "44444444-4444-4444-8444-444444444444",
+          workspace: {
+            organizationId: "44444444-4444-4444-8444-444444444444",
+            name: "Acme",
+          },
+        },
+      });
+    },
+  );
+  const handler = createDashboardHostedHandler({
+    apiUrl: new URL("https://api.example.test"),
+    mcpResourceUrl: new URL("https://dashboard.example.test/mcp"),
+    issuer: new URL("https://app.mydaykeeper.com"),
+    allowedHostnames: ["dashboard.example.test"],
+    dashboardHtml: "<!doctype html><html></html>",
+    fetchImpl: async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/oauth/introspect") {
+        introspections++;
+        return Response.json({
+          data: {
+            active: true,
+            resource: "https://dashboard.example.test/mcp",
+            clientId: "dashboard-client",
+            connectionId: "connection-1",
+            userId: "33333333-3333-4333-8333-333333333333",
+            organizationId: "44444444-4444-4444-8444-444444444444",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            scopes: ["daykeeper.accounts:read"],
+          },
+        });
+      }
+      if (path === "/v1/oauth/exchange") {
+        exchanges++;
+        return Response.json({
+          data: {
+            access_token: "daykeeper-exchanged-api-token-123456789",
+            token_type: "Bearer",
+            expires_in: 300,
+          },
+        });
+      }
+      throw new Error(`Unexpected API request: ${path}`);
+    },
+  });
+  context.after(async () => handler.close());
+
+  await Promise.all(
+    Array.from({ length: 80 }, async (_, index) => {
+      const token =
+        index % 2 === 0 ? "same-valid-looking-token" : `token-${index}`;
+      const initialize = await handler.fetch(
+        mcpRequest(
+          "initialize",
+          index * 3 + 1,
+          {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: `dashboard-test-${index}`, version: "1.0.0" },
+          },
+          token,
+        ),
+      );
+      assert.equal(initialize.status, 200);
+      assert.equal(
+        (await responseMessage(initialize)).result.serverInfo.name,
+        "daykeeper-dashboard",
+      );
+
+      const initialized = await handler.fetch(
+        mcpRequest("notifications/initialized", undefined, {}, token),
+      );
+      assert.ok([200, 202].includes(initialized.status));
+
+      const list = await handler.fetch(
+        mcpRequest("tools/list", index * 3 + 2, {}, token),
+      );
+      assert.equal(list.status, 200);
+      assert.equal((await responseMessage(list)).result.tools.length, 10);
+    }),
+  );
+  assert.equal(introspections, 0);
+  assert.equal(exchanges, 0);
+  assert.equal(profileReads, 0);
+
+  const protectedResources = await handler.fetch(
+    mcpRequest("resources/list", 500, {}, "valid-resource-token"),
+  );
+  assert.equal(protectedResources.status, 200);
+  await protectedResources.text();
+  assert.equal(introspections, 1);
+  assert.equal(exchanges, 1);
+
+  const unauthenticatedProfile = await handler.fetch(
+    mcpRequest("tools/call", 501, { name: "get_profile", arguments: {} }),
+  );
+  assert.equal(unauthenticatedProfile.status, 200);
+  assert.equal(
+    (await responseMessage(unauthenticatedProfile)).result.content[0].text,
+    welcomeMessage,
+  );
+  assert.equal(introspections, 1);
+
+  const authenticatedProfile = await handler.fetch(
+    mcpRequest(
+      "tools/call",
+      502,
+      { name: "get_profile", arguments: {} },
+      "real-profile-token",
+    ),
+  );
+  assert.equal(authenticatedProfile.status, 200);
+  assert.deepEqual(
+    (await responseMessage(authenticatedProfile)).result.structuredContent,
+    {
+      userId: "33333333-3333-4333-8333-333333333333",
+      name: "Alex",
+      email: "alex@example.test",
+      workspaceId: "44444444-4444-4444-8444-444444444444",
+      workspaceName: "Acme",
+      workspace: {
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "Acme",
+      },
+    },
+  );
+  assert.equal(introspections, 2);
+  assert.equal(exchanges, 2);
+  assert.equal(profileReads, 1);
+});
+
 test("a token verification service outage stays an HTTP 503", async (context) => {
   const handler = createDashboardHostedHandler({
     apiUrl: new URL("https://api.example.test"),

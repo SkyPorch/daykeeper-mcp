@@ -13,6 +13,10 @@ always be traced back to the contract it was built against.
 | 0.3.0         | 1.3.0               | `v1.3.0`     | `067465edfc6c94e63867a6dd0d9db02e12683877` | 0.3.0                 |
 | 0.2.0         | 1.1.0               | `v1.1.0`     | `d2a498187f49e63e687a2d93bd7becf1193bb1e9` | 0.2.0                 |
 
+The unreleased 0.4.0 Dashboard source candidate is built against the staged
+`@skyporch/daykeeper` 0.6.0 source in `artifacts/daykeeper-dashboard/node`.
+This source pairing is not a published package compatibility claim.
+
 ## Notes
 
 - 0.3.0 consumes management contract 1.3.0 (tag `v1.3.0`) through

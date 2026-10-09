@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 (unreleased source candidate)
+
+### Added
+
+- Adds an opt-in hosted Dashboard MCP with connection-bound profile, workspace,
+  tenant readiness, and usage tools; bounded conversation browsing; replies,
+  status changes, and customer-email settings.
+- Adds a Daykeeper Dashboard App resource to `show_dashboard` only. The existing
+  local MCP tools and stdio entry point remain available.
+- Requires a caller-supplied UUID request ID for a dashboard reply and preserves
+  it for retries after an uncertain result.
+
+### Contract
+
+- Uses the staged `@skyporch/daykeeper` 0.6.0 source candidate. This MCP package
+  version is unreleased; no npm publication is claimed.
+
 ## 0.3.0
 
 ### Contract

@@ -1,12 +1,13 @@
 {
   "name": "@skyporch/daykeeper-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "description": "Scoped Model Context Protocol adapter for the Daykeeper management API",
   "type": "module",
   "sideEffects": false,
   "bin": {
-    "daykeeper-mcp": "./dist/cli.js"
+    "daykeeper-mcp": "./dist/cli.js",
+    "daykeeper-dashboard-mcp": "./dist/dashboard-listener.js"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -32,7 +33,7 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts src/cli.ts --format esm,cjs --dts --sourcemap --target node20 --clean && node scripts/normalize-sourcemaps.mjs",
+    "build": "tsup src/index.ts src/cli.ts src/dashboard-listener.ts --format esm,cjs --dts --sourcemap --target node20 --clean && node scripts/normalize-sourcemaps.mjs",
     "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm smoke && pnpm pack:check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -64,7 +65,7 @@
   "homepage": "https://www.mydaykeeper.com",
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "@skyporch/daykeeper": "0.3.0",
+    "@skyporch/daykeeper": "link:../node",
     "zod": "4.4.3"
   },
   "devDependencies": {

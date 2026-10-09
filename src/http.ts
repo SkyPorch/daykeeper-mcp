@@ -9,6 +9,7 @@ import {
   type AuthInfo,
   type McpHttpHandler,
   type OAuthMetadata,
+  type McpServer,
   type ServerEventBus,
   type ServerNotifier,
 } from "@modelcontextprotocol/server";
@@ -110,6 +111,11 @@ export interface DaykeeperMcpHttpOptions {
     | DaykeeperMcpHttpPrincipal
     | null
     | Promise<DaykeeperMcpHttpPrincipal | null>;
+  /** Optional product-specific server builder; the HTTP security boundary stays shared. */
+  readonly createServer?: (
+    principal: Readonly<DaykeeperMcpHttpPrincipal>,
+    runtime: DaykeeperMcpRuntime,
+  ) => McpServer;
   /** Hostnames only. The canonical resource hostname must be included. */
   readonly allowedHostnames: readonly string[];
   /** Exact HTTPS origins allowed to call the MCP endpoint from a browser. */
@@ -213,7 +219,9 @@ export function createDaykeeperMcpHttpHandler(
       const principal = authInfo && principals.get(authInfo);
       if (!principal)
         throw new Error("Authenticated principal context was unavailable.");
-      return createDaykeeperMcpServerForRuntime(principal.daykeeper, runtime);
+      return options.createServer
+        ? options.createServer(principal, runtime)
+        : createDaykeeperMcpServerForRuntime(principal.daykeeper, runtime);
     },
     {
       legacy: "stateless",

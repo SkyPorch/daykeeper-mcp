@@ -13,12 +13,16 @@ test("hosted OAuth metadata advertises RFC 9207 authorization response issuer su
   context.after(async () => handler.close());
 
   const response = await handler.fetch(
-    new Request("https://dashboard.example.test/.well-known/oauth-authorization-server", {
-      headers: { host: "dashboard.example.test" },
-    }),
+    new Request(
+      "https://dashboard.example.test/.well-known/oauth-authorization-server",
+      {
+        headers: { host: "dashboard.example.test" },
+      },
+    ),
   );
   assert.equal(response.status, 200);
   const metadata = (await response.json()) as Record<string, unknown>;
   assert.equal(metadata.issuer, "https://app.mydaykeeper.com");
   assert.equal(metadata.authorization_response_iss_parameter_supported, true);
+  assert.equal(metadata.client_id_metadata_document_supported, true);
 });

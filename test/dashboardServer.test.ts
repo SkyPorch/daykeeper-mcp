@@ -265,6 +265,20 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
   } as const;
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
+  const wireResponses: unknown[] = [];
+  const send = serverTransport.send.bind(serverTransport);
+  serverTransport.send = async (message) => {
+    if (
+      message &&
+      typeof message === "object" &&
+      "result" in message &&
+      message.result &&
+      typeof message.result === "object" &&
+      "tools" in message.result
+    )
+      wireResponses.push(message);
+    await send(message);
+  };
   const handle = serveStdio(
     () =>
       createDashboardMcpServer(
@@ -299,6 +313,12 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
   await client.connect(clientTransport, { timeout: 3_000 });
 
   const { tools } = await client.listTools();
+  const wireToolList = wireResponses.find((message) => {
+    const result = (message as { result?: { tools?: unknown } }).result;
+    return Array.isArray(result?.tools);
+  }) as { result: { tools: Array<Record<string, unknown>> } } | undefined;
+  assert.ok(wireToolList, "tools/list response must be captured on the wire");
+  assert.equal(wireToolList.result.tools.length, 10);
   const resourceUri = "ui://daykeeper-dashboard/dashboard.html";
   const expectedScopes: Record<string, string[]> = {
     get_profile: ["daykeeper.accounts:read"],
@@ -312,21 +332,34 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
       "daykeeper.accounts:read",
       "daykeeper.conversations:read",
     ],
-    send_reply: [
-      "daykeeper.accounts:read",
-      "daykeeper.conversations:write",
-    ],
+    send_reply: ["daykeeper.accounts:read", "daykeeper.conversations:write"],
     set_conversation_status: [
       "daykeeper.accounts:read",
       "daykeeper.conversations:write",
     ],
     get_customer_email: ["daykeeper.accounts:read"],
-    set_customer_email: [
-      "daykeeper.accounts:read",
-      "daykeeper.accounts:write",
-    ],
+    set_customer_email: ["daykeeper.accounts:read", "daykeeper.accounts:write"],
     show_dashboard: ["daykeeper.accounts:read"],
   };
+  const wireToolsByName = new Map(
+    wireToolList.result.tools.map((tool) => [String(tool.name), tool]),
+  );
+  assert.deepEqual(
+    [...wireToolsByName.keys()].sort(),
+    Object.keys(expectedScopes).sort(),
+  );
+  for (const [name, tool] of wireToolsByName) {
+    assert.deepEqual(tool.securitySchemes, [
+      { type: "oauth2", scopes: expectedScopes[name] },
+    ]);
+    const meta = tool._meta as
+      { securitySchemes?: unknown; ui?: { resourceUri?: string } } | undefined;
+    assert.deepEqual(meta?.securitySchemes, tool.securitySchemes);
+    assert.equal(
+      meta?.ui?.resourceUri,
+      name === "show_dashboard" ? resourceUri : undefined,
+    );
+  }
   for (const tool of tools) {
     const meta = (
       tool as unknown as {
@@ -336,19 +369,14 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
         };
       }
     )._meta;
-    assert.equal(
-      (tool as unknown as { securitySchemes?: unknown }).securitySchemes,
-      undefined,
-      "SDK 2 tools/list does not serialize top-level securitySchemes",
-    );
-    const expected = [
-      { type: "oauth2", scopes: expectedScopes[tool.name] },
-    ];
+    const wireTool = wireToolsByName.get(tool.name)!;
+    const expected = [{ type: "oauth2", scopes: expectedScopes[tool.name] }];
     assert.deepEqual(
       meta?.securitySchemes,
       expected,
       `${tool.name} compatibility policy`,
     );
+    assert.deepEqual(wireTool.securitySchemes, expected);
     assert.equal(
       meta?.ui?.resourceUri,
       tool.name === "show_dashboard" ? resourceUri : undefined,
@@ -385,6 +413,11 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
   );
   assert.match(challenge?.[0] ?? "", /error="invalid_token"/);
   assert.match(challenge?.[0] ?? "", /error_description="[^"]+"/);
+  assert.match(challenge?.[0] ?? "", /Connect Daykeeper to continue/);
+  const challengeDescription =
+    /error_description="([^"]+)"/.exec(challenge?.[0] ?? "")?.[1] ?? "";
+  assert.doesNotMatch(challengeDescription, /https?:\/\//i);
+  assert.doesNotMatch(challenge?.[0] ?? "", /Codex/i);
   assert.doesNotMatch(challenge?.[0] ?? "", /daykeeper-exchanged-api-token/);
 
   const workspaces = await client.callTool({
@@ -458,11 +491,12 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
   });
   rejectEmailScope = false;
   assert.equal(insufficientScope.isError, true);
-  const scopeChallenge = (
-    insufficientScope as unknown as {
-      _meta?: { "mcp/www_authenticate"?: string[] };
-    }
-  )._meta?.["mcp/www_authenticate"]?.[0] ?? "";
+  const scopeChallenge =
+    (
+      insufficientScope as unknown as {
+        _meta?: { "mcp/www_authenticate"?: string[] };
+      }
+    )._meta?.["mcp/www_authenticate"]?.[0] ?? "";
   assert.match(scopeChallenge, /error="insufficient_scope"/);
   assert.match(scopeChallenge, /error_description="[^"]+"/);
   const emailUpdate = await client.callTool({

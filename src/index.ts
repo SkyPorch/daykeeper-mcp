@@ -18,6 +18,8 @@ export {
   MAX_HTTP_RESPONSE_BYTES,
 } from "./http.ts";
 export type {
+  DaykeeperDiscoveryMetric,
+  DaykeeperDiscoveryOperation,
   DaykeeperMcpHttpHandler,
   DaykeeperMcpHttpOptions,
   DaykeeperMcpHttpPrincipal,

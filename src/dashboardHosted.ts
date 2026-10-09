@@ -6,6 +6,7 @@ import {
   createDaykeeperMcpHttpHandler,
   DaykeeperMcpAuthenticationUnavailableError,
   DaykeeperMcpInvalidTokenError,
+  type DaykeeperDiscoveryMetric,
   type DaykeeperMcpHttpHandler,
   type DaykeeperMcpHttpPrincipal,
   type DaykeeperMcpTokenVerifier,
@@ -40,6 +41,7 @@ export interface DashboardHostedOptions {
   readonly fetchImpl?: typeof fetch;
   readonly onToolMetric?: (metric: DashboardToolMetric) => void;
   readonly onOAuthMetric?: (metric: DashboardOAuthMetric) => void;
+  readonly onDiscoveryMetric?: (metric: DaykeeperDiscoveryMetric) => void;
 }
 
 /** OAuth resource adapter: MCP token in, separately exchanged API token out. */
@@ -140,6 +142,7 @@ export function createDashboardHostedHandler(
     scopesSupported: DASHBOARD_SCOPES,
     allowedHostnames: options.allowedHostnames,
     allowedOrigins: options.allowedOrigins,
+    onDiscoveryMetric: options.onDiscoveryMetric,
     resolvePrincipal: async (authInfo, { signal }) => {
       try {
         const response = await apiCall(

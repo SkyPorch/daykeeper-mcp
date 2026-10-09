@@ -1,4 +1,5 @@
 import type { DashboardOAuthMetric } from "./dashboardHosted.ts";
+import type { DaykeeperDiscoveryMetric } from "./http.ts";
 import type { DashboardToolMetric } from "./dashboardServer.ts";
 
 const toolNames = [
@@ -13,11 +14,25 @@ const toolNames = [
   "set_customer_email",
   "show_dashboard",
 ] as const;
+const discoveryOperations = [
+  "initialize",
+  "notifications/initialized",
+  "ping",
+  "tools/list",
+  "resources/list",
+  "resources/templates/list",
+] as const satisfies readonly DaykeeperDiscoveryMetric["operation"][];
 
 type OutcomeCounts = { success: number; failure: number };
 type ToolCounts = {
   success: number;
   unknown: number;
+  failure: number;
+  latencyMsTotal: number;
+  latencyMsMax: number;
+};
+type DiscoveryCounts = {
+  success: number;
   failure: number;
   latencyMsTotal: number;
   latencyMsMax: number;
@@ -43,6 +58,15 @@ export class DashboardMetrics {
         },
       ]),
     ) as Record<(typeof toolNames)[number], ToolCounts>;
+  readonly #discovery: Record<
+    (typeof discoveryOperations)[number],
+    DiscoveryCounts
+  > = Object.fromEntries(
+    discoveryOperations.map((operation) => [
+      operation,
+      { success: 0, failure: 0, latencyMsTotal: 0, latencyMsMax: 0 },
+    ]),
+  ) as Record<(typeof discoveryOperations)[number], DiscoveryCounts>;
   readonly #replyOutcomes = { sent: 0, unknown: 0, failed: 0 };
   #activeHttpConnections = 0;
 
@@ -73,6 +97,17 @@ export class DashboardMetrics {
     }
   }
 
+  recordDiscovery(metric: DaykeeperDiscoveryMetric): void {
+    if (!(discoveryOperations as readonly string[]).includes(metric.operation))
+      return;
+    const operation =
+      this.#discovery[metric.operation as (typeof discoveryOperations)[number]];
+    operation[metric.outcome]++;
+    const durationMs = Math.min(120_000, Math.max(0, metric.durationMs));
+    operation.latencyMsTotal += durationMs;
+    operation.latencyMsMax = Math.max(operation.latencyMsMax, durationMs);
+  }
+
   flush(): void {
     const intervalEndedAt = new Date();
     const record = {
@@ -85,6 +120,12 @@ export class DashboardMetrics {
         exchange: { ...this.#oauth.exchange },
         grantsValidated: this.#oauth.introspection.success,
       },
+      discovery: Object.fromEntries(
+        discoveryOperations.map((operation) => [
+          operation,
+          { ...this.#discovery[operation] },
+        ]),
+      ),
       tools: Object.fromEntries(
         toolNames.map((name) => [name, { ...this.#tools[name] }]),
       ),
@@ -99,6 +140,12 @@ export class DashboardMetrics {
     for (const counts of Object.values(this.#tools)) {
       counts.success = 0;
       counts.unknown = 0;
+      counts.failure = 0;
+      counts.latencyMsTotal = 0;
+      counts.latencyMsMax = 0;
+    }
+    for (const counts of Object.values(this.#discovery)) {
+      counts.success = 0;
       counts.failure = 0;
       counts.latencyMsTotal = 0;
       counts.latencyMsMax = 0;

@@ -134,6 +134,22 @@ export interface DaykeeperMcpHttpOptions {
   readonly maxConcurrentAuthentications?: number;
   readonly maxConcurrentRequestsPerPrincipal?: number;
   readonly onerror?: (message: string) => void;
+  /** Aggregate outcome and latency for authenticated and anonymous discovery requests. */
+  readonly onDiscoveryMetric?: (metric: DaykeeperDiscoveryMetric) => void;
+}
+
+export type DaykeeperDiscoveryOperation =
+  | "initialize"
+  | "notifications/initialized"
+  | "ping"
+  | "tools/list"
+  | "resources/list"
+  | "resources/templates/list";
+
+export interface DaykeeperDiscoveryMetric {
+  readonly operation: DaykeeperDiscoveryOperation;
+  readonly outcome: "success" | "failure";
+  readonly durationMs: number;
 }
 
 export interface DaykeeperMcpHttpHandler {
@@ -230,6 +246,7 @@ export function createDaykeeperMcpHttpHandler(
   );
   const resolvePrincipal = options.resolvePrincipal;
   const reportError = options.onerror;
+  const reportDiscoveryMetric = options.onDiscoveryMetric;
   const admitAnonymous = (): (() => void) | null => {
     if (inFlight + anonymousInFlight >= config.maxConcurrentRequests)
       return null;
@@ -326,6 +343,7 @@ export function createDaykeeperMcpHttpHandler(
           admitAnonymous,
           lifetime.signal,
           reportError,
+          reportDiscoveryMetric,
         );
       return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
     }
@@ -382,6 +400,7 @@ export function createDaykeeperMcpHttpHandler(
           admitAnonymous,
           lifetime.signal,
           reportError,
+          reportDiscoveryMetric,
         );
       return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
     }
@@ -411,6 +430,7 @@ export function createDaykeeperMcpHttpHandler(
             admitAnonymous,
             lifetime.signal,
             reportError,
+            reportDiscoveryMetric,
           )
         : withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
     }
@@ -423,6 +443,9 @@ export function createDaykeeperMcpHttpHandler(
     let releaseDownstreamBinding: (() => void) | undefined;
     let released = false;
     let releaseInFinally = true;
+    let discoveryOperation: DaykeeperDiscoveryOperation | undefined;
+    let discoveryOutcome: DaykeeperDiscoveryMetric["outcome"] = "failure";
+    let discoveryStartedAt = performance.now();
     const releaseAdmission = () => {
       if (released) return;
       released = true;
@@ -490,6 +513,10 @@ export function createDaykeeperMcpHttpHandler(
         requestSignal,
       );
       if (bounded instanceof Response) return withCors(bounded, origin);
+      if (reportDiscoveryMetric) {
+        discoveryOperation = await discoveryOperationFromRequest(bounded);
+        discoveryStartedAt = performance.now();
+      }
       const response = await handler.fetch(bounded, { authInfo: auth });
       principals.delete(auth);
       const boundedOutput = boundedResponse(
@@ -500,6 +527,11 @@ export function createDaykeeperMcpHttpHandler(
         releaseAdmission,
       );
       if (boundedOutput.ownsAdmission) releaseInFinally = false;
+      discoveryOutcome =
+        boundedOutput.response.status >= 200 &&
+        boundedOutput.response.status < 300
+          ? "success"
+          : "failure";
       return withCors(boundedOutput.response, origin);
     } catch {
       reportError?.("Daykeeper MCP request could not be completed.");
@@ -509,6 +541,13 @@ export function createDaykeeperMcpHttpHandler(
       );
     } finally {
       principals.delete(auth);
+      if (discoveryOperation)
+        recordDiscoveryMetric(
+          reportDiscoveryMetric,
+          discoveryOperation,
+          discoveryOutcome,
+          Math.max(0, performance.now() - discoveryStartedAt),
+        );
       if (releaseInFinally) releaseAdmission();
     }
   };
@@ -536,10 +575,14 @@ async function dispatchAnonymous(
   admit: () => (() => void) | null,
   lifetimeSignal: AbortSignal,
   reportError: DaykeeperMcpHttpOptions["onerror"],
+  reportDiscoveryMetric: DaykeeperMcpHttpOptions["onDiscoveryMetric"],
 ): Promise<Response> {
   const release = admit();
   if (!release) return withCors(concurrencyResponse(), origin);
   let releaseInFinally = true;
+  let discoveryOperation: DaykeeperDiscoveryOperation | undefined;
+  let discoveryOutcome: DaykeeperDiscoveryMetric["outcome"] = "failure";
+  const startedAt = performance.now();
   try {
     const signal = AbortSignal.any([request.signal, lifetimeSignal]);
     const bounded = await boundedRequest(
@@ -560,6 +603,15 @@ async function dispatchAnonymous(
     }
     const method = objectField(message, "method");
     const params = objectField(message, "params");
+    if (
+      method === "initialize" ||
+      method === "notifications/initialized" ||
+      method === "ping" ||
+      method === "tools/list" ||
+      method === "resources/list" ||
+      method === "resources/templates/list"
+    )
+      discoveryOperation = method;
     if (
       method === "resources/read" ||
       method === "resources/subscribe" ||
@@ -589,6 +641,11 @@ async function dispatchAnonymous(
       release,
     );
     if (boundedOutput.ownsAdmission) releaseInFinally = false;
+    discoveryOutcome =
+      boundedOutput.response.status >= 200 &&
+      boundedOutput.response.status < 300
+        ? "success"
+        : "failure";
     return withCors(boundedOutput.response, origin);
   } catch {
     reportError?.("Daykeeper MCP discovery request failed.");
@@ -597,7 +654,46 @@ async function dispatchAnonymous(
       origin,
     );
   } finally {
+    if (discoveryOperation)
+      recordDiscoveryMetric(
+        reportDiscoveryMetric,
+        discoveryOperation,
+        discoveryOutcome,
+        Math.max(0, performance.now() - startedAt),
+      );
     if (releaseInFinally) release();
+  }
+}
+
+async function discoveryOperationFromRequest(
+  request: Request,
+): Promise<DaykeeperDiscoveryOperation | undefined> {
+  try {
+    const message = (await request.clone().json()) as Record<string, unknown>;
+    const method = message.method;
+    return method === "initialize" ||
+      method === "notifications/initialized" ||
+      method === "ping" ||
+      method === "tools/list" ||
+      method === "resources/list" ||
+      method === "resources/templates/list"
+      ? method
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recordDiscoveryMetric(
+  callback: DaykeeperMcpHttpOptions["onDiscoveryMetric"],
+  operation: DaykeeperDiscoveryOperation,
+  outcome: DaykeeperDiscoveryMetric["outcome"],
+  durationMs: number,
+): void {
+  try {
+    callback?.({ operation, outcome, durationMs });
+  } catch {
+    // Metrics are aggregate-only and never affect the MCP response.
   }
 }
 

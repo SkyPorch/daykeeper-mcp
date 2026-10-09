@@ -43,6 +43,7 @@ async function main(): Promise<void> {
     dashboardHtml,
     onOAuthMetric: (metric) => metrics.recordOAuth(metric),
     onToolMetric: (metric) => metrics.recordTool(metric),
+    onDiscoveryMetric: (metric) => metrics.recordDiscovery(metric),
   });
   const host = process.env.DAYKEEPER_DASHBOARD_MCP_BIND ?? "0.0.0.0";
   const port = parsePort(process.env.DAYKEEPER_DASHBOARD_MCP_PORT);

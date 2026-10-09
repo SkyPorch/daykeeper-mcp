@@ -349,9 +349,12 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
     Object.keys(expectedScopes).sort(),
   );
   for (const [name, tool] of wireToolsByName) {
-    assert.deepEqual(tool.securitySchemes, [
-      { type: "oauth2", scopes: expectedScopes[name] },
-    ]);
+    assert.deepEqual(
+      tool.securitySchemes,
+      name === "get_profile"
+        ? [{ type: "noauth" }, { type: "oauth2", scopes: expectedScopes[name] }]
+        : [{ type: "oauth2", scopes: expectedScopes[name] }],
+    );
     const meta = tool._meta as
       { securitySchemes?: unknown; ui?: { resourceUri?: string } } | undefined;
     assert.deepEqual(meta?.securitySchemes, tool.securitySchemes);
@@ -370,7 +373,13 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
       }
     )._meta;
     const wireTool = wireToolsByName.get(tool.name)!;
-    const expected = [{ type: "oauth2", scopes: expectedScopes[tool.name] }];
+    const expected =
+      tool.name === "get_profile"
+        ? [
+            { type: "noauth" },
+            { type: "oauth2", scopes: expectedScopes[tool.name] },
+          ]
+        : [{ type: "oauth2", scopes: expectedScopes[tool.name] }];
     assert.deepEqual(
       meta?.securitySchemes,
       expected,

@@ -4,12 +4,15 @@ import {
 } from "@modelcontextprotocol/server";
 import {
   createDaykeeperMcpHttpHandler,
+  DaykeeperMcpAuthenticationUnavailableError,
+  DaykeeperMcpInvalidTokenError,
   type DaykeeperMcpHttpHandler,
   type DaykeeperMcpHttpPrincipal,
   type DaykeeperMcpTokenVerifier,
   type DaykeeperMcpVerifiedAuthInfo,
 } from "./http.ts";
 import {
+  createDashboardAnonymousMcpServer,
   createDashboardMcpServer,
   type DashboardToolMetric,
 } from "./dashboardServer.ts";
@@ -65,7 +68,7 @@ export function createDashboardHostedHandler(
           typeof value.expiresAt !== "string" ||
           !Array.isArray(value.scopes)
         )
-          throw new Error("invalid_token");
+          throw new DaykeeperMcpInvalidTokenError();
         const scopes = value.scopes.filter(
           (scope): scope is string =>
             typeof scope === "string" &&
@@ -74,11 +77,11 @@ export function createDashboardHostedHandler(
             ),
         );
         if (scopes.length !== value.scopes.length)
-          throw new Error("invalid_scopes");
+          throw new DaykeeperMcpInvalidTokenError();
         const expiresAt = Math.floor(Date.parse(value.expiresAt) / 1_000);
         const now = Math.floor(Date.now() / 1_000);
         if (!Number.isSafeInteger(expiresAt) || expiresAt <= now)
-          throw new Error("expired_token");
+          throw new DaykeeperMcpInvalidTokenError();
         const auth: DaykeeperMcpVerifiedAuthInfo = {
           token,
           clientId: value.clientId,
@@ -100,7 +103,13 @@ export function createDashboardHostedHandler(
           operation: "introspection",
           outcome: "failure",
         });
-        throw error;
+        if (
+          error instanceof DaykeeperMcpInvalidTokenError ||
+          (error instanceof DashboardApiError &&
+            [400, 401, 403].includes(error.status))
+        )
+          throw new DaykeeperMcpInvalidTokenError();
+        throw new DaykeeperMcpAuthenticationUnavailableError();
       }
     },
   };
@@ -189,6 +198,11 @@ export function createDashboardHostedHandler(
         getOAuthProtectedResourceMetadataUrl(options.mcpResourceUrl),
         options.onToolMetric,
       ),
+    createAnonymousServer: () =>
+      createDashboardAnonymousMcpServer(
+        getOAuthProtectedResourceMetadataUrl(options.mcpResourceUrl),
+        options.onToolMetric,
+      ),
   });
 }
 
@@ -229,7 +243,7 @@ async function apiCall(
     });
     if (!response.ok) {
       await response.body?.cancel();
-      throw new Error("dashboard_authentication_failed");
+      throw new DashboardApiError(response.status);
     }
     const declaredLength = Number(response.headers.get("content-length") ?? 0);
     if (declaredLength > 32_768) {
@@ -256,6 +270,13 @@ async function apiCall(
     };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+class DashboardApiError extends Error {
+  constructor(readonly status: number) {
+    super("Daykeeper authentication service returned an error.");
+    this.name = "DashboardApiError";
   }
 }
 

@@ -1,4 +1,8 @@
-import { DaykeeperClient } from "@skyporch/daykeeper";
+import {
+  DaykeeperApiError,
+  DaykeeperClient,
+  DaykeeperTransportError,
+} from "@skyporch/daykeeper";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import {
   ENVELOPE_VERSION,
@@ -7,9 +11,28 @@ import {
   MAX_RESPONSE_BYTES,
   type DaykeeperMcpConfig,
 } from "./config.ts";
-import { McpAdapterError, safeError } from "./errors.ts";
+import { createDashboardApi } from "./dashboardApi.ts";
+import { McpAdapterError, safeError, type SafeError } from "./errors.ts";
 import { outputSchema } from "./schemas.ts";
 import { toolEnabled, type Execute, type ToolMetadata } from "./tools.ts";
+
+/**
+ * The pinned SDK only accepts HTTPS (or loopback HTTP) base URLs. A hosted
+ * deployment may reach the API over a private network by an explicitly
+ * allowlisted service name (validated in config.ts). The SDK is then given the
+ * same host and path under https, and the bounded transport below maps that
+ * one origin back to the configured http origin. Nothing else is rewritten.
+ */
+function sdkBaseUrl(baseUrl: string): { sdk: string; dispatchOrigin: string } {
+  const url = new URL(baseUrl);
+  const loopback = ["localhost", "127.0.0.1"].includes(url.hostname);
+  if (url.protocol !== "http:" || loopback)
+    return { sdk: baseUrl, dispatchOrigin: url.origin };
+  const virtual = new URL(baseUrl);
+  virtual.protocol = "https:";
+  if (url.port === "") virtual.port = "80";
+  return { sdk: virtual.href.replace(/\/$/, ""), dispatchOrigin: url.origin };
+}
 
 export function createExecutor(
   config: DaykeeperMcpConfig,
@@ -77,23 +100,48 @@ export function createExecutor(
         );
       inFlight++;
       admitted = true;
+      const target = sdkBaseUrl(config.baseUrl);
+      const sdkOrigin = new URL(target.sdk).origin;
       const fetch: typeof globalThis.fetch = async (url, init) => {
         try {
           assertActive();
           const actual = new URL(
             typeof url === "string" || url instanceof URL ? url : url.url,
           );
-          if (actual.origin !== new URL(config.baseUrl).origin)
+          if (actual.origin !== sdkOrigin)
             throw new McpAdapterError(
               "INVALID_REQUEST_TARGET",
               "The SDK request did not target the configured API origin.",
             );
+          const destination =
+            sdkOrigin === target.dispatchOrigin
+              ? url
+              : new URL(
+                  `${actual.pathname}${actual.search}`,
+                  target.dispatchOrigin,
+                );
           // A static credential and a dispatch guard avoid any late request after
           // the caller has cancelled. The SDK cannot redirect or replay a write.
+          // Pass-through only: the end client's address chain, so per-client
+          // API rate limits see the person rather than this host. Sent only to
+          // an explicitly allowlisted internal API host.
+          const outgoing = new Headers(init?.headers);
+          outgoing.delete("x-forwarded-for");
+          const dispatchHost = new URL(
+            typeof destination === "string" || destination instanceof URL
+              ? destination
+              : destination.url,
+          ).hostname;
+          if (
+            config.forwardedFor !== undefined &&
+            config.internalHttpHostnames.includes(dispatchHost)
+          )
+            outgoing.set("x-forwarded-for", config.forwardedFor);
           requestSent = true;
           const pending = Promise.resolve(
-            transport(url, {
+            transport(destination, {
               ...init,
+              headers: outgoing,
               signal: controller.signal,
               redirect: "error",
               credentials: "omit",
@@ -137,12 +185,17 @@ export function createExecutor(
         }
       };
       const client = new DaykeeperClient({
-        baseUrl: config.baseUrl,
+        baseUrl: target.sdk,
         token: config.accessToken,
         timeoutMs: config.timeoutMs,
         fetch,
       });
-      const data = await abortable(work(client), controller.signal);
+      const api = createDashboardApi({
+        baseUrl: target.sdk,
+        token: config.accessToken,
+        fetch,
+      });
+      const data = await abortable(work(client, api), controller.signal);
       assertActive();
       if (
         !data ||
@@ -156,6 +209,8 @@ export function createExecutor(
           "INVALID_API_RESPONSE",
           "The API did not return the expected JSON object or resource list.",
         );
+      if (metadata.profile === "dashboard")
+        return dashboardResult(metadata, config.accessToken, data as object);
       return result(metadata, config.accessToken, { ok: true, data });
     } catch (error) {
       const details = safeError(
@@ -178,7 +233,12 @@ export function createExecutor(
             "INTERNAL_ERROR",
           ].includes(details.code) ||
           details.status === 408 ||
-          (details.status ?? 0) >= 500)
+          (details.status ?? 0) >= 500 ||
+          // The API itself may say a dispatched write's outcome is unknown,
+          // for example 409 REQUEST_OUTCOME_UNKNOWN on an idempotent replay.
+          ((error instanceof DaykeeperApiError ||
+            error instanceof DaykeeperTransportError) &&
+            error.outcomeUnknown))
       ) {
         details.mutationOutcome = "unknown";
         details.nextActions = [
@@ -210,10 +270,28 @@ export function createExecutor(
             "use_a_fresh_key_only_for_a_different_request",
           ]),
         ];
-      return result(metadata, config.accessToken, {
-        ok: false,
-        error: details,
-      });
+      const failure =
+        metadata.profile === "dashboard"
+          ? dashboardError(metadata, config.accessToken, details, input)
+          : result(metadata, config.accessToken, {
+              ok: false,
+              error: details,
+            });
+      // The API refused the bearer itself (revoked, expired or disconnected
+      // mid-session): carry the RFC 6750 challenge ChatGPT turns into a
+      // "reconnect" prompt. Only for a real API 401, never a local refusal.
+      if (
+        details.kind === "api" &&
+        details.status === 401 &&
+        config.resourceMetadataUrl !== undefined
+      )
+        failure._meta = {
+          ...failure._meta,
+          "mcp/www_authenticate": [
+            `Bearer resource_metadata="${config.resourceMetadataUrl}", error="invalid_token", error_description="Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."`,
+          ],
+        };
+      return failure;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", cancel);
@@ -282,6 +360,76 @@ function result(
     content: [{ type: "text", text }],
     structuredContent,
   };
+}
+
+/**
+ * Dashboard tools answer with their own flat, per-tool structured content so
+ * ChatGPT and the dashboard UI read the fields directly. The access token is
+ * redacted from both representations, as in the general envelope.
+ */
+function dashboardResult(
+  metadata: ToolMetadata,
+  secret: string,
+  data: object,
+): CallToolResult {
+  const text = redact(JSON.stringify(data), secret);
+  return {
+    content: [{ type: "text", text }],
+    structuredContent: JSON.parse(text) as Record<string, unknown>,
+  };
+}
+
+function dashboardError(
+  metadata: ToolMetadata,
+  secret: string,
+  details: SafeError,
+  input: unknown,
+): CallToolResult {
+  const unknown = details.mutationOutcome === "unknown";
+  // A send's key is minted before dispatch, so it can always be handed back:
+  // the only safe retry of an uncertain send reuses that exact key.
+  const key =
+    metadata.requiresIdempotencyKey &&
+    input &&
+    typeof input === "object" &&
+    "idempotencyKey" in input &&
+    typeof input.idempotencyKey === "string" &&
+    /^[A-Za-z0-9._:-]{16,128}$/.test(input.idempotencyKey)
+      ? input.idempotencyKey
+      : undefined;
+  const what = metadata.name === "send_reply" ? "reply" : "change";
+  const message =
+    details.code === "REQUEST_IN_PROGRESS" && key
+      ? `This ${what} is still being processed under idempotencyKey "${key}". Wait, check the current state, and retry only with that same key.`
+      : details.code === "IDEMPOTENCY_KEY_REUSED"
+        ? `idempotencyKey${key ? ` "${key}"` : ""} was already used for a different ${what}. Check the current state; use a new key only for a genuinely different ${what}.`
+        : unknown
+          ? key
+            ? `The ${metadata.name === "send_reply" ? "reply may already have been sent" : "change may already have been made"}. Check the current state before trying again. To retry, repeat the call with idempotencyKey "${key}"; never with a new key.`
+            : "The change may already have been made. Check the current state before trying again."
+          : details.status === 401
+            ? "Your Daykeeper connection has expired or was revoked. Reconnect Daykeeper to continue."
+            : details.message;
+  const error = {
+    code: details.code,
+    message,
+    retryable: unknown ? false : details.retryable,
+    ...(details.status === undefined ? {} : { status: details.status }),
+    ...(unknown ? { outcome: "unknown" as const } : {}),
+    ...(key ? { idempotencyKey: key } : {}),
+    nextActions: details.nextActions,
+    ...(details.correlationId ? { correlationId: details.correlationId } : {}),
+  };
+  const text = redact(JSON.stringify({ tool: metadata.name, error }), secret);
+  return {
+    isError: true,
+    content: [{ type: "text", text }],
+    structuredContent: JSON.parse(text) as Record<string, unknown>,
+  };
+}
+
+function redact(text: string, secret: string): string {
+  return text.split(JSON.stringify(secret).slice(1, -1)).join("[REDACTED]");
 }
 
 async function readBody(

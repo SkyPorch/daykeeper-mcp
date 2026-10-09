@@ -15,6 +15,7 @@ import {
   MAX_HTTP_REQUEST_READ_MS,
   MAX_HTTP_RESPONSE_BYTES,
   MAX_HTTP_RESPONSE_READ_MS,
+  type DaykeeperMcpHttpExchangeOptions,
   type DaykeeperMcpHttpOptions,
   type DaykeeperMcpHttpPrincipal,
   type DaykeeperMcpTokenVerifier,
@@ -75,7 +76,7 @@ function principal(
 }
 
 function options(
-  overrides: Partial<DaykeeperMcpHttpOptions> = {},
+  overrides: Partial<DaykeeperMcpHttpExchangeOptions> = {},
 ): DaykeeperMcpHttpOptions {
   return {
     resourceServerUrl: RESOURCE,
@@ -918,4 +919,40 @@ test("close stops MCP traffic without hiding OAuth discovery", async () => {
     request("/.well-known/oauth-protected-resource/mcp"),
   );
   assert.equal(discovery.status, 200);
+});
+
+test("a hosted principal keeps every feature gate it was resolved with, including claim tools", async (context) => {
+  const handler = createDaykeeperMcpHttpHandler(
+    options({
+      resolvePrincipal: async () =>
+        principal({
+          daykeeper: {
+            baseUrl: BASE_URL,
+            accessToken: DOWNSTREAM_TOKEN,
+            scopes: ["daykeeper.tenants:read"],
+            enableClaimTools: true,
+          },
+        }),
+    }),
+  );
+  const transport = new StreamableHTTPClientTransport(RESOURCE, {
+    authProvider: { token: async () => MCP_TOKEN },
+    fetch: async (input, init) => {
+      const incoming = new Request(input, init);
+      const headers = new Headers(incoming.headers);
+      headers.set("host", RESOURCE.hostname);
+      return handler.fetch(new Request(incoming, { headers }));
+    },
+  });
+  const client = new Client(
+    { name: "daykeeper-http-test", version: "0.0.0" },
+    { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+  );
+  context.after(async () => {
+    await client.close();
+    await handler.close();
+  });
+  await client.connect(transport, { timeout: 3_000 });
+  const names = (await client.listTools()).tools.map((tool) => tool.name);
+  assert(names.includes("daykeeper_workspace_claims_list"));
 });

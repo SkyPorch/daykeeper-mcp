@@ -13,6 +13,7 @@ import {
   tenantSpec,
 } from "./schemas.ts";
 import type { DaykeeperMcpConfig } from "./config.ts";
+import type { DashboardApi } from "./dashboardApi.ts";
 import { McpAdapterError } from "./errors.ts";
 import { assertInboxSdk, inboxSdk } from "./sdkInbox.ts";
 import { activationSdk, assertActivationSdk } from "./sdkActivation.ts";
@@ -43,11 +44,13 @@ export interface ToolMetadata {
   requiresClaimTools?: boolean;
   requiresOperatorTools?: boolean;
   requiresOperatorWrites?: boolean;
+  /** Registered only by, and only for, this fixed tool profile. */
+  profile?: "dashboard";
 }
 export type Execute = (
   metadata: ToolMetadata,
   input: unknown,
-  work: (client: DaykeeperClient) => Promise<unknown>,
+  work: (client: DaykeeperClient, api: DashboardApi) => Promise<unknown>,
   signal: AbortSignal,
 ) => Promise<CallToolResult>;
 export interface ToolDefinition {
@@ -61,6 +64,7 @@ export interface ToolDefinition {
     client: DaykeeperClient,
     input: unknown,
     signal?: AbortSignal,
+    api?: DashboardApi,
   ): Promise<unknown>;
   register(
     server: McpServer,
@@ -130,7 +134,7 @@ function define<Schema extends z.ZodType>(
   };
 }
 
-type SafeInputSchema = Pick<z.ZodType, "~standard">;
+export type SafeInputSchema = Pick<z.ZodType, "~standard">;
 
 function isInboxTenantPlan(value: unknown): boolean {
   if (!value || typeof value !== "object" || !("spec" in value)) return false;
@@ -144,7 +148,7 @@ function isInboxTenantPlan(value: unknown): boolean {
 
 // Keep the exact advertised JSON schema while withholding caller-supplied
 // property names, values and parser diagnostics from protocol error messages.
-function redactedInputSchema(schema: z.ZodType): SafeInputSchema {
+export function redactedInputSchema(schema: z.ZodType): SafeInputSchema {
   return {
     "~standard": {
       ...schema["~standard"],
@@ -972,6 +976,9 @@ export function toolEnabled(
   metadata: ToolMetadata,
   config: DaykeeperMcpConfig,
 ): boolean {
+  // A fixed profile replaces the general catalog entirely, in both directions.
+  if (metadata.profile === "dashboard" || config.toolProfile === "dashboard")
+    return metadata.profile === config.toolProfile;
   if (metadata.requiresInboxTools && !config.enableInboxTools) return false;
   if (metadata.requiresActivationTools && !config.enableActivationTools)
     return false;
@@ -1005,6 +1012,7 @@ export function registerTools(
   config: DaykeeperMcpConfig,
   execute: Execute,
 ): void {
+  if (config.toolProfile !== "general") return;
   for (const definition of definitions) {
     if (!toolEnabled(definition.metadata, config)) continue;
     // Never wire a flow write to an SDK whose mutations cannot carry a key.

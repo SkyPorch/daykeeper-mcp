@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { McpAdapterError } from "./errors.ts";
 
 export const MCP_VERSION = "0.3.0";
@@ -33,11 +34,44 @@ interface DaykeeperMcpBaseOptions {
    * guess. This never grants anything: the API remains the authority.
    */
   scopes?: readonly string[];
+  /**
+   * Replace the general tool catalog with a fixed product profile. The
+   * "dashboard" profile exposes exactly the ten Daykeeper Dashboard tools and
+   * ignores every other feature gate. Omitted keeps the general catalog.
+   */
+  toolProfile?: DaykeeperMcpToolProfile;
+  /**
+   * Dashboard profile only: the dedicated HTTPS origin ChatGPT renders the
+   * dashboard UI under (`_meta.ui.domain`). Omitted leaves the host default.
+   */
+  dashboardWidgetDomain?: string;
+  /**
+   * Exact private-network hostnames (for example a container service name)
+   * that may be reached over plain HTTP. Loopback is always allowed. Hosted
+   * entrypoints set this; it is not read from the stdio environment.
+   */
+  internalHttpHostnames?: readonly string[];
+  /**
+   * Hosted pass-through only: the end client's `X-Forwarded-For` chain, sent
+   * on every API call so per-client rate limits see the real client. It is
+   * sent only when the API host is in `internalHttpHostnames`; a value that is
+   * not a short list of IP literals is dropped, never forwarded.
+   */
+  forwardedFor?: string;
+  /**
+   * The RFC 9728 metadata URL of the MCP resource. When set, a tool whose API
+   * call is refused with 401 carries `_meta["mcp/www_authenticate"]` so the
+   * client can ask the person to reconnect.
+   */
+  resourceMetadataUrl?: string;
   fetch?: typeof globalThis.fetch;
 }
 
+export type DaykeeperMcpToolProfile = "dashboard";
+
 // Matches the scope names published by the management SDK contract.
-const SCOPE_PATTERN = /^daykeeper\.[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/;
+export const SCOPE_PATTERN =
+  /^daykeeper\.[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/;
 const MAX_SCOPES = 32;
 
 export type DaykeeperMcpOptions = DaykeeperMcpBaseOptions &
@@ -70,6 +104,13 @@ export interface DaykeeperMcpConfig {
   readonly enableOperatorWrites: boolean;
   /** Undefined when the operator declared no scope list. */
   readonly scopes: readonly string[] | undefined;
+  /** "general" is the gated catalog; "dashboard" is the fixed ChatGPT set. */
+  readonly toolProfile: "general" | DaykeeperMcpToolProfile;
+  readonly dashboardWidgetDomain: string | undefined;
+  readonly internalHttpHostnames: readonly string[];
+  /** Validated forwarded chain, present only for an internal API host. */
+  readonly forwardedFor: string | undefined;
+  readonly resourceMetadataUrl: string | undefined;
 }
 
 export function validateOptions(
@@ -84,8 +125,13 @@ export function validateOptions(
     const url = new URL(options.baseUrl);
     // These are the loopback hosts supported by the pinned management SDK.
     const loopback = ["localhost", "127.0.0.1"].includes(url.hostname);
+    const internalHostnames = normalizeInternalHostnames(
+      options.internalHttpHostnames,
+    );
+    const internal = internalHostnames.includes(url.hostname);
     if (
-      (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+      (url.protocol !== "https:" &&
+        !(url.protocol === "http:" && (loopback || internal))) ||
       url.username ||
       url.password ||
       url.search ||
@@ -122,6 +168,29 @@ export function validateOptions(
         throw invalidConfig();
     }
     const scopes = normalizeScopes(options.scopes);
+    if (
+      options.toolProfile !== undefined &&
+      options.toolProfile !== "dashboard"
+    )
+      throw invalidConfig();
+    const widgetDomain = options.dashboardWidgetDomain;
+    if (
+      widgetDomain !== undefined &&
+      (typeof widgetDomain !== "string" ||
+        options.toolProfile !== "dashboard" ||
+        new URL(widgetDomain).protocol !== "https:" ||
+        new URL(widgetDomain).origin !== widgetDomain)
+    )
+      throw invalidConfig();
+    const metadataUrl = options.resourceMetadataUrl;
+    if (
+      metadataUrl !== undefined &&
+      (typeof metadataUrl !== "string" ||
+        new URL(metadataUrl).protocol !== "https:" ||
+        new URL(metadataUrl).href !== metadataUrl ||
+        /["\\\s]/.test(metadataUrl))
+    )
+      throw invalidConfig();
     return Object.freeze({
       baseUrl: url.href.replace(/\/$/, ""),
       accessToken: credential,
@@ -136,6 +205,13 @@ export function validateOptions(
       enableOperatorTools: options.enableOperatorTools ?? false,
       enableOperatorWrites: options.enableOperatorWrites ?? false,
       scopes,
+      toolProfile: options.toolProfile ?? "general",
+      dashboardWidgetDomain: widgetDomain,
+      internalHttpHostnames: internalHostnames,
+      forwardedFor: internal
+        ? normalizeForwardedFor(options.forwardedFor)
+        : undefined,
+      resourceMetadataUrl: metadataUrl,
     });
   } catch {
     throw invalidConfig();
@@ -194,6 +270,56 @@ export function readEnvironment(
     enableOperatorWrites: config.enableOperatorWrites,
     ...(config.scopes === undefined ? {} : { scopes: config.scopes }),
   });
+}
+
+export const MAX_FORWARDED_FOR_ENTRIES = 8;
+export const MAX_FORWARDED_FOR_LENGTH = 512;
+
+/**
+ * A comma-separated chain of bare IPv4/IPv6 literals (no ports, brackets or
+ * zone ids), at most 8 entries and 512 characters. Anything else yields
+ * undefined: the header is dropped entirely rather than forwarded.
+ */
+export function normalizeForwardedFor(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_FORWARDED_FOR_LENGTH
+  )
+    return undefined;
+  const entries = value.split(",").map((entry) => entry.trim());
+  if (
+    entries.length > MAX_FORWARDED_FOR_ENTRIES ||
+    entries.some(
+      (entry) => entry === "" || entry.includes("%") || isIP(entry) === 0,
+    )
+  )
+    return undefined;
+  return entries.join(", ");
+}
+
+const INTERNAL_HOSTNAME =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+/**
+ * Exact lowercase DNS names only: no IP literals, ports, wildcards or
+ * loopback aliases. An empty or omitted list allows nothing beyond loopback.
+ */
+export function normalizeInternalHostnames(
+  hostnames: readonly string[] | undefined,
+): readonly string[] {
+  if (hostnames === undefined) return Object.freeze([]);
+  if (!Array.isArray(hostnames) || hostnames.length > 16) throw invalidConfig();
+  for (const hostname of hostnames) {
+    if (
+      typeof hostname !== "string" ||
+      hostname.length > 253 ||
+      !INTERNAL_HOSTNAME.test(hostname) ||
+      /^[0-9.]+$/.test(hostname)
+    )
+      throw invalidConfig();
+  }
+  return Object.freeze([...new Set(hostnames)]);
 }
 
 function normalizeScopes(

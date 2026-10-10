@@ -56,6 +56,15 @@ export function createDashboardHostedHandler(
   options: DashboardHostedOptions,
 ): DaykeeperMcpHttpHandler {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  // The advertised issuer is the URL origin and the endpoints are resolved
+  // from the root, so a pathful issuer would advertise a different identifier
+  // than the authorization server uses. Refuse it instead.
+  if (
+    options.issuer.pathname !== "/" ||
+    options.issuer.search ||
+    options.issuer.hash
+  )
+    throw new Error("The Daykeeper OAuth issuer must be an origin URL.");
   const verifier: DaykeeperMcpTokenVerifier = {
     async verifyAccessToken(token, context) {
       try {
@@ -240,7 +249,7 @@ async function apiCall(
   const timer = setTimeout(() => controller.abort(), 5_000);
   timer.unref?.();
   try {
-    const response = await fetchImpl(new URL(path, apiUrl), {
+    const response = await fetchImpl(apiEndpoint(apiUrl, path), {
       method: "POST",
       redirect: "error",
       credentials: "omit",
@@ -282,6 +291,12 @@ async function apiCall(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Joins an API route under the configured base, keeping any base path. */
+export function apiEndpoint(apiUrl: URL, path: string): URL {
+  const base = apiUrl.href.endsWith("/") ? apiUrl.href : `${apiUrl.href}/`;
+  return new URL(path.replace(/^\/+/, ""), base);
 }
 
 class DashboardApiError extends Error {

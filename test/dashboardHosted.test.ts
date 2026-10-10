@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sdkSupportsDashboard } from "../src/sdkDashboard.ts";
-import { createDashboardHostedHandler } from "../src/dashboardHosted.ts";
+import {
+  apiEndpoint,
+  createDashboardHostedHandler,
+} from "../src/dashboardHosted.ts";
 
 const welcomeMessage =
   "Welcome to Daykeeper! Customer live chat for small teams in the age of AI. Create your account or connect your existing account to get started.";
@@ -36,6 +39,44 @@ async function responseMessage(response: Response) {
   const json = dataLine ? dataLine.slice(6).trim() : body;
   return JSON.parse(json) as Record<string, any>;
 }
+
+test("OAuth API routes keep a configured API base path", () => {
+  assert.equal(
+    apiEndpoint(new URL("https://api.example.test"), "/v1/oauth/introspect")
+      .href,
+    "https://api.example.test/v1/oauth/introspect",
+  );
+  assert.equal(
+    apiEndpoint(new URL("https://api.example.test/proxy"), "/v1/oauth/exchange")
+      .href,
+    "https://api.example.test/proxy/v1/oauth/exchange",
+  );
+  assert.equal(
+    apiEndpoint(
+      new URL("https://api.example.test/proxy/"),
+      "/v1/oauth/exchange",
+    ).href,
+    "https://api.example.test/proxy/v1/oauth/exchange",
+  );
+});
+
+test("a pathful OAuth issuer is refused at construction", () => {
+  for (const issuer of [
+    "https://id.example.test/tenant",
+    "https://id.example.test/?x=1",
+  ])
+    assert.throws(
+      () =>
+        createDashboardHostedHandler({
+          apiUrl: new URL("https://api.example.test"),
+          mcpResourceUrl: new URL("https://dashboard.example.test/mcp"),
+          issuer: new URL(issuer),
+          allowedHostnames: ["dashboard.example.test"],
+          dashboardHtml: "<!doctype html><html></html>",
+        }),
+      /issuer must be an origin URL/,
+    );
+});
 
 test("hosted OAuth metadata advertises RFC 9207 authorization response issuer support", async (context) => {
   const handler = createDashboardHostedHandler({

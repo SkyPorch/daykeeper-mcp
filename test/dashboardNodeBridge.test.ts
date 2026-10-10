@@ -96,3 +96,32 @@ test("a handler failure before headers answers a data-free 503", async (context)
   assert.equal(response.status, 503);
   assert.equal(response.body, "MCP request could not be completed.");
 });
+
+test(
+  "a client that disconnects before the response aborts the request",
+  { timeout: 10_000 },
+  async (context) => {
+    let aborted: () => void = () => {};
+    const sawAbort = new Promise<void>((resolve) => (aborted = resolve));
+    const server = await serve(
+      (request) =>
+        new Promise<Response>((_resolve, reject) => {
+          request.signal.addEventListener("abort", () => {
+            aborted();
+            reject(new Error("aborted"));
+          });
+        }),
+    );
+    context.after(server.close);
+    await new Promise<void>((resolve) => {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: server.port,
+        path: "/mcp",
+      });
+      req.on("error", () => resolve());
+      req.end(() => setTimeout(() => (req.destroy(), resolve()), 20));
+    });
+    await sawAbort;
+  },
+);

@@ -10,6 +10,14 @@ export async function forwardDashboardRequest(
   resourceUrl: URL,
   fetchHandler: (request: Request) => Promise<Response>,
 ): Promise<void> {
+  // A client that disconnects before the response is written cancels the
+  // request, so verification, exchange and tool work stop and release their
+  // admission slots instead of running to completion or timeout.
+  const disconnect = new AbortController();
+  const onClose = () => {
+    if (!outgoing.writableFinished) disconnect.abort();
+  };
+  outgoing.once("close", onClose);
   try {
     const path = incoming.url ?? "/";
     const headers = new Headers();
@@ -23,6 +31,7 @@ export async function forwardDashboardRequest(
     const request = new Request(new URL(path, resourceUrl.origin), {
       method,
       headers,
+      signal: disconnect.signal,
       ...(hasBody
         ? { body: Readable.toWeb(incoming) as ReadableStream<Uint8Array> }
         : {}),
@@ -47,5 +56,7 @@ export async function forwardDashboardRequest(
     if (!outgoing.headersSent)
       outgoing.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
     outgoing.end("MCP request could not be completed.");
+  } finally {
+    outgoing.off("close", onClose);
   }
 }

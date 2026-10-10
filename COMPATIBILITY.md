@@ -15,8 +15,9 @@ always be traced back to the contract it was built against.
 
 The unreleased hosted dashboard on this branch needs `@skyporch/daykeeper`
 0.6.0 (management contract 1.9.0). CI's `sdk-candidate` job packs
-`SkyPorch/daykeeper-node` commit `f408b9118e2a0809bc7522d10f8581b68678f9f0`
-(PR #40 head) for it; that is a branch pin, never a release claim. Before the
+`SkyPorch/daykeeper-node` commit `665cd7e4eed5d17f2004dcce673fa4bd9dce82e0`
+(main after PR #40 merged; SDK 0.6.0 is not released) for it. That is
+a source pin, never a release claim. Before the
 next MCP release: tag contract `v1.9.0`, release SDK 0.6.0, repin the
 candidate to that tag's commit, and move the dependency to 0.6.0.
 

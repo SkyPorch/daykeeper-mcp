@@ -214,8 +214,8 @@ released. The stdio `daykeeper-mcp` command and its tools are unchanged.
 
 The `@skyporch/daykeeper@0.2.0` dependency adds generic inbox, website inbox and
 tenant provisioning and activation methods. CI's `sdk-candidate` job currently
-packs `SkyPorch/daykeeper-node` commit `f408b9118e2a0809bc7522d10f8581b68678f9f0`
-(the unreleased SDK 0.6.0 candidate, PR #40) for the hosted dashboard; it must
+packs `SkyPorch/daykeeper-node` commit `665cd7e4eed5d17f2004dcce673fa4bd9dce82e0`
+(main after PR #40, the unreleased SDK 0.6.0) for the hosted dashboard; it must
 be repinned to the released `v0.6.0` tag before an MCP release.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.

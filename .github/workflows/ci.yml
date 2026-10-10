@@ -69,10 +69,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: SkyPorch/daykeeper-node
-          # SDK 0.6.0 candidate: head of SkyPorch/daykeeper-node#40 (unreleased),
-          # which the hosted dashboard needs. Repin to the released v0.6.0 tag
-          # commit before an MCP release.
-          ref: f408b9118e2a0809bc7522d10f8581b68678f9f0
+          # SDK 0.6.0 candidate: daykeeper-node main after #40 merged (0.6.0 is
+          # not released yet), which the hosted dashboard needs. Repin to the
+          # released v0.6.0 tag commit before an MCP release.
+          ref: 665cd7e4eed5d17f2004dcce673fa4bd9dce82e0
           path: sdk-candidate
           persist-credentials: false
       - uses: pnpm/action-setup@v4

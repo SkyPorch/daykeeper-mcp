@@ -321,7 +321,11 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
   assert.equal(wireToolList.result.tools.length, 10);
   const resourceUri = "ui://daykeeper-dashboard/dashboard.html";
   const expectedScopes: Record<string, string[]> = {
-    get_profile: ["daykeeper.accounts:read"],
+    get_profile: [
+      "daykeeper.accounts:read",
+      "daykeeper.billing:read",
+      "daykeeper.conversations:read",
+    ],
     list_workspaces: ["daykeeper.accounts:read"],
     get_dashboard: ["daykeeper.accounts:read", "daykeeper.billing:read"],
     list_conversations: [
@@ -517,6 +521,7 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
     )._meta?.["mcp/www_authenticate"]?.[0] ?? "";
   assert.match(scopeChallenge, /error="insufficient_scope"/);
   assert.match(scopeChallenge, /error_description="[^"]+"/);
+  assert.match(scopeChallenge, /scope="daykeeper\.accounts:read"/);
   const emailUpdate = await client.callTool({
     name: "set_customer_email",
     arguments: { enabled: true },

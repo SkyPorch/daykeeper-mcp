@@ -108,7 +108,14 @@ test("signed-out dashboard supports discovery and data-free profile/read/write c
   const profile = tools.find((tool) => tool.name === "get_profile");
   assert.deepEqual(profile?.securitySchemes, [
     { type: "noauth" },
-    { type: "oauth2", scopes: ["daykeeper.accounts:read"] },
+    {
+      type: "oauth2",
+      scopes: [
+        "daykeeper.accounts:read",
+        "daykeeper.billing:read",
+        "daykeeper.conversations:read",
+      ],
+    },
   ]);
   for (const tool of tools.filter(
     (candidate) => candidate.name !== "get_profile",
@@ -219,6 +226,180 @@ test("an inactive token falls back to a data-free tool sign-in challenge", async
   assert.equal(introspections, 1);
 });
 
+test("limited grants challenge dashboard reads before API access, then work after read-scope upgrade", async (context) => {
+  const grantedScopes = ["daykeeper.accounts:read"];
+  const apiRequests: string[] = [];
+  context.mock.method(
+    globalThis,
+    "fetch",
+    async (input: Parameters<typeof fetch>[0]) => {
+      const path = new URL(input instanceof Request ? input.url : String(input))
+        .pathname;
+      apiRequests.push(path);
+      if (path === "/v1/profile")
+        return Response.json({
+          data: {
+            userId: "33333333-3333-4333-8333-333333333333",
+            name: "Alex",
+            email: "alex@example.test",
+            organizationId: "44444444-4444-4444-8444-444444444444",
+            workspace: {
+              organizationId: "44444444-4444-4444-8444-444444444444",
+              name: "Acme",
+            },
+          },
+        });
+      if (path === "/v1/tenants")
+        return Response.json({
+          data: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              state: "ready",
+              createdAt: "2026-02-01T00:00:00.000Z",
+              spec: { inbox: { type: "api" } },
+            },
+          ],
+        });
+      if (path === "/v1/entitlements")
+        return Response.json({ data: { policy: { plan: "pro" } } });
+      if (path === "/v1/usage")
+        return Response.json({
+          data: { resources: { conversationRecords: { used: 7, limit: 100 } } },
+        });
+      if (path.endsWith("/inbox"))
+        return Response.json({ data: { trafficEnabled: true } });
+      if (path.endsWith("/customer-email"))
+        return Response.json({ data: { enabled: false } });
+      if (path.endsWith("/conversations"))
+        return Response.json({
+          data: { conversations: [], page: { limit: 20 } },
+        });
+      throw new Error(`Unexpected dashboard API request: ${path}`);
+    },
+  );
+  const handler = createDashboardHostedHandler({
+    apiUrl: new URL("https://api.example.test"),
+    mcpResourceUrl: new URL("https://dashboard.example.test/mcp"),
+    issuer: new URL("https://app.mydaykeeper.com"),
+    allowedHostnames: ["dashboard.example.test"],
+    dashboardHtml: "<!doctype html><html></html>",
+    fetchImpl: async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/oauth/introspect")
+        return Response.json({
+          data: {
+            active: true,
+            resource: "https://dashboard.example.test/mcp",
+            clientId: "dashboard-client",
+            connectionId: "connection-1",
+            userId: "33333333-3333-4333-8333-333333333333",
+            organizationId: "44444444-4444-4444-8444-444444444444",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            scopes: grantedScopes,
+          },
+        });
+      if (path === "/v1/oauth/exchange")
+        return Response.json({
+          data: {
+            access_token: "daykeeper-exchanged-api-token-123456789",
+            token_type: "Bearer",
+            expires_in: 300,
+          },
+        });
+      throw new Error(`Unexpected OAuth request: ${path}`);
+    },
+  });
+  context.after(async () => handler.close());
+
+  const limitedGrantChecks = [
+    [
+      1,
+      "get_profile",
+      {},
+      [
+        "daykeeper.accounts:read",
+        "daykeeper.billing:read",
+        "daykeeper.conversations:read",
+      ],
+    ],
+    [
+      2,
+      "get_dashboard",
+      {},
+      ["daykeeper.accounts:read", "daykeeper.billing:read"],
+    ],
+    [
+      3,
+      "list_conversations",
+      { limit: 20 },
+      ["daykeeper.accounts:read", "daykeeper.conversations:read"],
+    ],
+  ] as const;
+  for (const [id, name, args, requiredScopes] of limitedGrantChecks) {
+    const response = await handler.fetch(
+      mcpRequest("tools/call", id, { name, arguments: args }, "limited-token"),
+    );
+    const result = (await responseMessage(response)).result;
+    assert.equal(response.status, 200);
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.error.code, "SCOPE_NOT_GRANTED");
+    assert.equal(result.structuredContent.error.status, 403);
+    assert.match(
+      result.content[0].text,
+      /signed-in connection needs these permissions/i,
+    );
+    const challenge = result._meta["mcp/www_authenticate"][0];
+    assert.match(challenge, /error="insufficient_scope"/);
+    assert.ok(challenge.includes(`scope="${requiredScopes.join(" ")}"`));
+  }
+  assert.deepEqual(apiRequests, []);
+
+  const emailResponse = await handler.fetch(
+    mcpRequest(
+      "tools/call",
+      7,
+      { name: "get_customer_email", arguments: {} },
+      "limited-token",
+    ),
+  );
+  const emailResult = (await responseMessage(emailResponse)).result;
+  assert.equal(emailResponse.status, 200);
+  assert.notEqual(emailResult.isError, true);
+  assert.deepEqual(emailResult.structuredContent, { enabled: false });
+  assert.deepEqual(apiRequests, [
+    "/v1/tenants",
+    "/v1/tenants/11111111-1111-4111-8111-111111111111/customer-email",
+  ]);
+
+  grantedScopes.push("daykeeper.billing:read", "daykeeper.conversations:read");
+  for (const [id, name, args] of [
+    [4, "get_profile", {}],
+    [5, "get_dashboard", {}],
+    [6, "list_conversations", { limit: 20 }],
+  ] as const) {
+    const response = await handler.fetch(
+      mcpRequest("tools/call", id, { name, arguments: args }, "upgraded-token"),
+    );
+    const result = (await responseMessage(response)).result;
+    assert.equal(response.status, 200);
+    assert.notEqual(result.isError, true);
+  }
+  assert.deepEqual(
+    apiRequests.sort(),
+    [
+      "/v1/profile",
+      "/v1/tenants",
+      "/v1/tenants",
+      "/v1/tenants",
+      "/v1/entitlements",
+      "/v1/usage",
+      "/v1/tenants/11111111-1111-4111-8111-111111111111/inbox",
+      "/v1/tenants/11111111-1111-4111-8111-111111111111/customer-email",
+      "/v1/tenants/11111111-1111-4111-8111-111111111111/conversations",
+    ].sort(),
+  );
+});
+
 test("authenticated startup discovery is static during a concurrent host burst", async (context) => {
   let introspections = 0;
   let exchanges = 0;
@@ -264,7 +445,11 @@ test("authenticated startup discovery is static during a concurrent host burst",
             userId: "33333333-3333-4333-8333-333333333333",
             organizationId: "44444444-4444-4444-8444-444444444444",
             expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            scopes: ["daykeeper.accounts:read"],
+            scopes: [
+              "daykeeper.accounts:read",
+              "daykeeper.billing:read",
+              "daykeeper.conversations:read",
+            ],
           },
         });
       }
@@ -419,7 +604,11 @@ test("hosted dashboard accepts 20 concurrent authenticated calls for one princip
             userId: "33333333-3333-4333-8333-333333333333",
             organizationId: "44444444-4444-4444-8444-444444444444",
             expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            scopes: ["daykeeper.accounts:read"],
+            scopes: [
+              "daykeeper.accounts:read",
+              "daykeeper.billing:read",
+              "daykeeper.conversations:read",
+            ],
           },
         });
       }

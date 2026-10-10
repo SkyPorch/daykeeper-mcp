@@ -6,7 +6,7 @@ The selected API tenant is derived from the OAuth-bound `tenants.list()` result 
 
 | Tool | Input | SDK call | Normalized result | Scope |
 | --- | --- | --- | --- | --- |
-| `get_profile` | `{}` | `profile.get()` | `{userId,name,email,workspaceId,workspaceName,workspace:{id,name}}` | `daykeeper.accounts:read` |
+| `get_profile` | `{}` | `profile.get()` | `{userId,name,email,workspaceId,workspaceName,workspace:{id,name}}` | Dashboard read check: `daykeeper.accounts:read` + `daykeeper.billing:read` + `daykeeper.conversations:read` |
 | `list_workspaces` | `{}` | `workspaces.list()` | `{workspaces:[{id,name}]}`; only the OAuth-bound workspace is returned | `daykeeper.accounts:read` |
 | `get_dashboard` | `{}` | `tenants.list()`, `entitlements.get()`, `usage.get()`, and `inboxes.get(selectedTenantId)` when selected tenant state is ready | `{readiness,plan:{name},usage:{used,limit,periodLabel,startsAt?,endsAt?}}`; absent counts remain null | `daykeeper.accounts:read` + `daykeeper.billing:read` |
 | `list_conversations` | `{cursor?,limit?}` | `operatorConversations.list(tenantId,{cursor,limit})` | `{conversations:[{id,label:"Conversation #ID",preview,updatedAtLabel,status}],page}` | `daykeeper.conversations:read` |

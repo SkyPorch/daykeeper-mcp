@@ -1,7 +1,7 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import type { DaykeeperClient } from "@skyporch/daykeeper";
 import { z } from "zod";
-import { validateOptions } from "./config.ts";
+import { ENVELOPE_VERSION, validateOptions } from "./config.ts";
 import type { DaykeeperMcpHttpPrincipal } from "./http.ts";
 import type { DaykeeperMcpRuntime } from "./server.ts";
 import { createExecutor } from "./transport.ts";
@@ -39,6 +39,12 @@ const scopes = {
   conversationsWrite: ["daykeeper.conversations:write"],
 } as const;
 
+export const DASHBOARD_READ_SCOPES = Object.freeze([
+  ...scopes.accountsRead,
+  ...scopes.billingRead,
+  ...scopes.conversationsRead,
+]);
+
 function metadata(
   name: string,
   effect: ToolMetadata["effect"],
@@ -64,7 +70,7 @@ function metadata(
 
 const descriptions: Record<string, string> = {
   get_profile:
-    "Read the signed-in Daykeeper profile and its connected workspace.",
+    "Check whether this signed-in connection has all permissions needed for dashboard reads.",
   list_workspaces:
     "List only workspaces authorized by this Daykeeper connection.",
   get_dashboard: "Read the current tenant, plan readiness, and recorded usage.",
@@ -114,7 +120,7 @@ const dashboardToolDescriptors: readonly DashboardToolDescriptor[] = [
   makeToolDescriptor(
     "get_profile",
     emptyInput,
-    metadata("get_profile", "read", scopes.accountsRead),
+    metadata("get_profile", "read", DASHBOARD_READ_SCOPES),
   ),
   makeToolDescriptor(
     "list_workspaces",
@@ -376,6 +382,11 @@ export function createDashboardMcpServer(
         const startedAt = performance.now();
         let outcome: DashboardToolMetric["outcome"] = "failure";
         try {
+          const missingScopes = meta.scopes.filter(
+            (scope) => !config.scopes?.includes(scope),
+          );
+          if (missingScopes.length > 0)
+            return scopeDeniedResult(meta, resourceMetadataUrl);
           const result = await execute(
             meta,
             input,
@@ -390,7 +401,7 @@ export function createDashboardMcpServer(
               name === "send_reply" && error.mutationOutcome === "unknown"
                 ? "unknown"
                 : "failure";
-            return addAuthChallenge(result, resourceMetadataUrl);
+            return addAuthChallenge(result, resourceMetadataUrl, meta.scopes);
           }
           const data = (
             result.structuredContent as { data?: unknown } | undefined
@@ -422,7 +433,7 @@ export function createDashboardMcpServer(
   register(
     "get_profile",
     emptyInput,
-    metadata("get_profile", "read", scopes.accountsRead),
+    metadata("get_profile", "read", DASHBOARD_READ_SCOPES),
     (client) => client.profile.get(),
     (value) => {
       const profile = objectValue(value);
@@ -710,6 +721,7 @@ export function createDashboardMcpServer(
 function addAuthChallenge(
   result: NormalizedResult,
   resourceMetadataUrl: string,
+  requiredScopes: readonly string[],
 ): NormalizedResult {
   const envelope = objectValue(result.structuredContent);
   const error = objectValue(envelope.error);
@@ -731,7 +743,10 @@ function addAuthChallenge(
     : "This Daykeeper connection needs additional permission to use this tool.";
   const quote = (value: string) =>
     value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-  const challenge = `Bearer resource_metadata="${quote(resourceMetadataUrl)}", error="${oauthError}", error_description="${quote(description)}"`;
+  const scopeParameter = scopeFailure
+    ? `, scope="${quote(requiredScopes.join(" "))}"`
+    : "";
+  const challenge = `Bearer resource_metadata="${quote(resourceMetadataUrl)}", error="${oauthError}", error_description="${quote(description)}"${scopeParameter}`;
   return {
     ...result,
     ...(authenticationFailure
@@ -741,6 +756,39 @@ function addAuthChallenge(
       ...result._meta,
       "mcp/www_authenticate": [challenge],
     },
+  };
+}
+
+function scopeDeniedResult(
+  meta: ToolMetadata,
+  resourceMetadataUrl: string,
+): NormalizedResult {
+  const requiredScopes = meta.scopes.join(", ");
+  const description =
+    "This Daykeeper connection is signed in but needs additional permission to use this dashboard tool.";
+  const structuredContent = {
+    schemaVersion: ENVELOPE_VERSION,
+    tool: meta.name,
+    effect: meta.effect,
+    ok: false,
+    error: {
+      kind: "adapter",
+      code: "SCOPE_NOT_GRANTED",
+      message: `The signed-in connection needs these permissions: ${requiredScopes}.`,
+      retryable: false,
+      status: 403,
+      fields: [],
+      nextActions: [],
+    },
+  };
+  const quote = (value: string) =>
+    value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  const challenge = `Bearer resource_metadata="${quote(resourceMetadataUrl)}", error="insufficient_scope", error_description="${quote(description)}", scope="${quote(meta.scopes.join(" "))}"`;
+  return {
+    isError: true,
+    content: [{ type: "text", text: JSON.stringify(structuredContent) }],
+    structuredContent,
+    _meta: { "mcp/www_authenticate": [challenge] },
   };
 }
 

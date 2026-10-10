@@ -31,6 +31,13 @@ export const DASHBOARD_SCOPES = Object.freeze([
   "daykeeper.conversations:write",
 ]);
 
+/** Higher hosted-dashboard concurrency; shared/local MCP defaults stay conservative. */
+export const DASHBOARD_HTTP_CAPACITY = Object.freeze({
+  maxConcurrentRequests: 128,
+  maxConcurrentAuthentications: 128,
+  maxConcurrentRequestsPerPrincipal: 32,
+});
+
 export interface DashboardHostedOptions {
   readonly apiUrl: URL;
   readonly mcpResourceUrl: URL;
@@ -142,6 +149,7 @@ export function createDashboardHostedHandler(
     scopesSupported: DASHBOARD_SCOPES,
     allowedHostnames: options.allowedHostnames,
     allowedOrigins: options.allowedOrigins,
+    ...DASHBOARD_HTTP_CAPACITY,
     onDiscoveryMetric: options.onDiscoveryMetric,
     resolvePrincipal: async (authInfo, { signal }) => {
       try {

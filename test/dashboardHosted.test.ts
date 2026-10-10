@@ -367,6 +367,101 @@ test("authenticated startup discovery is static during a concurrent host burst",
   assert.equal(profileReads, 1);
 });
 
+test("hosted dashboard accepts 20 concurrent authenticated calls for one principal", async (context) => {
+  const concurrentCalls = 20;
+  let introspections = 0;
+  let exchanges = 0;
+  let profileReads = 0;
+  let releaseProfiles!: () => void;
+  const allProfilesStarted = new Promise<void>((resolve) => {
+    releaseProfiles = resolve;
+  });
+  context.mock.method(
+    globalThis,
+    "fetch",
+    async (input: Parameters<typeof fetch>[0]) => {
+      const path = new URL(input instanceof Request ? input.url : String(input))
+        .pathname;
+      assert.equal(path, "/v1/profile");
+      profileReads++;
+      if (profileReads === concurrentCalls) releaseProfiles();
+      await allProfilesStarted;
+      return Response.json({
+        data: {
+          userId: "33333333-3333-4333-8333-333333333333",
+          name: "Alex",
+          email: "alex@example.test",
+          organizationId: "44444444-4444-4444-8444-444444444444",
+          workspace: {
+            organizationId: "44444444-4444-4444-8444-444444444444",
+            name: "Acme",
+          },
+        },
+      });
+    },
+  );
+  const handler = createDashboardHostedHandler({
+    apiUrl: new URL("https://api.example.test"),
+    mcpResourceUrl: new URL("https://dashboard.example.test/mcp"),
+    issuer: new URL("https://app.mydaykeeper.com"),
+    allowedHostnames: ["dashboard.example.test"],
+    dashboardHtml: "<!doctype html><html></html>",
+    fetchImpl: async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/oauth/introspect") {
+        introspections++;
+        return Response.json({
+          data: {
+            active: true,
+            resource: "https://dashboard.example.test/mcp",
+            clientId: "dashboard-client",
+            connectionId: "connection-1",
+            userId: "33333333-3333-4333-8333-333333333333",
+            organizationId: "44444444-4444-4444-8444-444444444444",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            scopes: ["daykeeper.accounts:read"],
+          },
+        });
+      }
+      if (path === "/v1/oauth/exchange") {
+        exchanges++;
+        return Response.json({
+          data: {
+            access_token: "daykeeper-exchanged-api-token-123456789",
+            token_type: "Bearer",
+            expires_in: 300,
+          },
+        });
+      }
+      throw new Error(`Unexpected API request: ${path}`);
+    },
+  });
+  context.after(async () => handler.close());
+
+  const results = await Promise.all(
+    Array.from({ length: concurrentCalls }, async (_, index) => {
+      const response = await handler.fetch(
+        mcpRequest(
+          "tools/call",
+          700 + index,
+          { name: "get_profile", arguments: {} },
+          "same-valid-looking-token",
+        ),
+      );
+      assert.equal(response.status, 200);
+      return (await responseMessage(response)).result;
+    }),
+  );
+
+  assert.equal(introspections, concurrentCalls);
+  assert.equal(exchanges, concurrentCalls);
+  assert.equal(profileReads, concurrentCalls);
+  for (const result of results) {
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent?.email, "alex@example.test");
+  }
+});
+
 test("a token verification service outage stays an HTTP 503", async (context) => {
   const handler = createDashboardHostedHandler({
     apiUrl: new URL("https://api.example.test"),

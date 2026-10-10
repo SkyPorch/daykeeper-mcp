@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Opt-in hosted Dashboard MCP (`daykeeper-dashboard-mcp`, off unless
+  `DAYKEEPER_DASHBOARD_MCP_ENABLED=true`) with connection-bound profile,
+  workspace, tenant readiness and usage tools; bounded conversation browsing;
+  replies, status changes and customer-email settings. OAuth discovery
+  metadata, data-free sign-in challenges before a token exists, and
+  read-permission checks before the inbox opens.
+- A Daykeeper Dashboard App resource on `show_dashboard` only. The existing
+  local MCP tools and stdio entry point are unchanged.
+- A dashboard reply requires a caller-supplied UUID `requestId`, preserved for
+  retries after an uncertain result.
+
+### Contract
+
+- The dashboard needs `@skyporch/daykeeper` 0.6.0 (management contract 1.9.0,
+  SkyPorch/daykeeper-node#40, unreleased). The release dependency stays at
+  0.3.0; the dashboard refuses to start and its tools answer `SDK_TOO_OLD`
+  until 0.6.0 is installed. Repin CI's SDK candidate and the dependency to the
+  released SDK before publishing.
+
 ## 0.3.0
 
 ### Contract

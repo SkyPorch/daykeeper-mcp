@@ -191,18 +191,32 @@ Before upgrading the pinned SDK, run `pnpm check:sdk-candidate /absolute/path/sd
 with a trusted locally built `@skyporch/daykeeper` tarball. This creates a separate
 consumer workspace, installs the candidate without install scripts, typechecks
 the adapter, and runs the full MCP test suite with zero skips, explicitly requiring
-all five flow, five inbox, four activation and seven operator conversation real-SDK cases. It records the artifact
+all five flow, five inbox, four activation, eight operator conversation and five
+hosted dashboard real-SDK cases. It records the artifact
 SHA-256 and logs; it never changes the release
 manifest or lockfile. Candidate code executes during tests, so do not use an
 untrusted tarball. CI pins the reviewed SDK source commit for this check;
 updating that pin is a separate review step, not an automatic release upgrade.
 This proves injected-transport compatibility, not live flow execution.
 
+## Hosted Daykeeper Dashboard (unreleased)
+
+`daykeeper-dashboard-mcp` is a separate, opt-in HTTP listener for the Daykeeper
+Dashboard ChatGPT app (`DAYKEEPER_DASHBOARD_MCP_ENABLED=true`). It verifies
+each MCP access token by introspection against the configured Daykeeper API,
+exchanges it for a separate API-resource token, and exposes ten
+connection-bound tools; see `docs/daykeeper-dashboard-tool-contract.md`. It
+needs `@skyporch/daykeeper` 0.6.0 (contract 1.9.0) and refuses to start with an
+older SDK; the published package still depends on 0.3.0 until that SDK is
+released. The stdio `daykeeper-mcp` command and its tools are unchanged.
+
 ## Programmatic inbox onboarding
 
 The `@skyporch/daykeeper@0.2.0` dependency adds generic inbox, website inbox and
-tenant provisioning and activation methods. CI pins the reviewed source commit
-`53bbbbb668a5953946af1fdb93103bb534038c11` and packs it separately.
+tenant provisioning and activation methods. CI's `sdk-candidate` job currently
+packs `SkyPorch/daykeeper-node` commit `665cd7e4eed5d17f2004dcce673fa4bd9dce82e0`
+(main after PR #40, the unreleased SDK 0.6.0) for the hosted dashboard; it must
+be repinned to the released `v0.6.0` tag before an MCP release.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.
 

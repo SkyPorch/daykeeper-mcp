@@ -13,6 +13,14 @@ always be traced back to the contract it was built against.
 | 0.3.0         | 1.3.0               | `v1.3.0`     | `067465edfc6c94e63867a6dd0d9db02e12683877` | 0.3.0                 |
 | 0.2.0         | 1.1.0               | `v1.1.0`     | `d2a498187f49e63e687a2d93bd7becf1193bb1e9` | 0.2.0                 |
 
+The unreleased hosted dashboard on this branch needs `@skyporch/daykeeper`
+0.6.0 (management contract 1.9.0). CI's `sdk-candidate` job packs
+`SkyPorch/daykeeper-node` commit `665cd7e4eed5d17f2004dcce673fa4bd9dce82e0`
+(main after PR #40 merged; SDK 0.6.0 is not released) for it. That is
+a source pin, never a release claim. Before the
+next MCP release: tag contract `v1.9.0`, release SDK 0.6.0, repin the
+candidate to that tag's commit, and move the dependency to 0.6.0.
+
 ## Notes
 
 - 0.3.0 consumes management contract 1.3.0 (tag `v1.3.0`) through

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { Readable } from "node:stream";
-import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { createDashboardHostedHandler } from "./dashboardHosted.ts";
 import { DashboardMetrics } from "./dashboardMetrics.ts";
+import { forwardDashboardRequest } from "./dashboardNodeBridge.ts";
+import { assertDashboardSdk } from "./sdkDashboard.ts";
 
 async function main(): Promise<void> {
   if (process.env.DAYKEEPER_DASHBOARD_MCP_ENABLED !== "true") {
@@ -14,6 +14,8 @@ async function main(): Promise<void> {
     );
     return;
   }
+  // Refuse to start with an SDK that cannot serve the dashboard tools.
+  assertDashboardSdk();
   const apiUrl = requiredUrl("DAYKEEPER_API_URL");
   const mcpResourceUrl = requiredUrl("DAYKEEPER_DASHBOARD_MCP_RESOURCE_URL");
   const issuer = requiredUrl("DAYKEEPER_OAUTH_ISSUER");
@@ -48,7 +50,12 @@ async function main(): Promise<void> {
   const host = process.env.DAYKEEPER_DASHBOARD_MCP_BIND ?? "0.0.0.0";
   const port = parsePort(process.env.DAYKEEPER_DASHBOARD_MCP_PORT);
   const listener = createServer((incoming, outgoing) => {
-    void handleRequest(incoming, outgoing, mcpResourceUrl, handler.fetch);
+    void forwardDashboardRequest(
+      incoming,
+      outgoing,
+      mcpResourceUrl,
+      handler.fetch,
+    );
   });
   let activeHttpConnections = 0;
   listener.on("connection", (socket) => {
@@ -74,46 +81,6 @@ async function main(): Promise<void> {
   };
   process.once("SIGTERM", () => void close());
   process.once("SIGINT", () => void close());
-}
-
-async function handleRequest(
-  incoming: IncomingMessage,
-  outgoing: import("node:http").ServerResponse,
-  resourceUrl: URL,
-  fetchHandler: (request: Request) => Promise<Response>,
-): Promise<void> {
-  try {
-    const path = incoming.url ?? "/";
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(incoming.headers)) {
-      if (Array.isArray(value))
-        for (const item of value) headers.append(key, item);
-      else if (value !== undefined) headers.set(key, value);
-    }
-    const method = incoming.method ?? "GET";
-    const hasBody = method !== "GET" && method !== "HEAD";
-    const request = new Request(new URL(path, resourceUrl.origin), {
-      method,
-      headers,
-      ...(hasBody
-        ? { body: Readable.toWeb(incoming) as ReadableStream<Uint8Array> }
-        : {}),
-      ...(hasBody ? { duplex: "half" as const } : {}),
-    });
-    const response = await fetchHandler(request);
-    outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-    if (!response.body) {
-      outgoing.end();
-      return;
-    }
-    Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>).pipe(
-      outgoing,
-    );
-  } catch {
-    if (!outgoing.headersSent)
-      outgoing.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
-    outgoing.end("MCP request could not be completed.");
-  }
 }
 
 function requiredUrl(name: string): URL {

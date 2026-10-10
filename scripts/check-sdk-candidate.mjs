@@ -128,8 +128,8 @@ assert.match(
 );
 assert.equal(
   (tap.match(/^ok \d+ - candidate SDK:/gm) ?? []).length,
-  22,
-  "All five flow, five inbox, four activation, and eight operator conversation packed-SDK cases must run",
+  27,
+  "All five flow, five inbox, four activation, eight operator conversation, and five hosted dashboard packed-SDK cases must run",
 );
 assert.deepEqual(await readFile("package.json"), originalManifest);
 assert.deepEqual(await readFile("pnpm-lock.yaml"), originalLock);
@@ -138,7 +138,7 @@ const result = {
   artifactSha256: createHash("sha256").update(bytes).digest("hex"),
   node: process.version,
   releaseManifestAndLockUnchanged: true,
-  candidateDispatchTests: 22,
+  candidateDispatchTests: 27,
   skipped: 0,
   scope:
     "Real packed SDK and in-memory MCP protocol with injected HTTP fixtures; no live API or provider certification",

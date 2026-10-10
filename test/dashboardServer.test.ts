@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sdkSupportsDashboard } from "../src/sdkDashboard.ts";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createDashboardMcpServer } from "../src/dashboardServer.ts";
@@ -8,7 +9,11 @@ import { BASE_URL, api } from "./helpers.ts";
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
 
-test("dashboard reply uses the connection-bound ready API tenant and required stable UUID", async (context) => {
+test("candidate SDK: dashboard reply uses the connection-bound ready API tenant and required stable UUID", async (context) => {
+  if (!sdkSupportsDashboard()) {
+    context.skip("installed SDK does not expose the dashboard methods");
+    return;
+  }
   const requests: Array<{
     method: string;
     url: string;
@@ -140,7 +145,11 @@ test("dashboard reply uses the connection-bound ready API tenant and required st
   assert.equal(requests.length, 2);
 });
 
-test("dashboard reads and mutations normalize their main-use contract, and only show_dashboard declares the UI resource", async (context) => {
+test("candidate SDK: dashboard reads and mutations normalize their main-use contract, and only show_dashboard declares the UI resource", async (context) => {
+  if (!sdkSupportsDashboard()) {
+    context.skip("installed SDK does not expose the dashboard methods");
+    return;
+  }
   const requests: Array<{ method: string; path: string }> = [];
   let rejectProfile = false;
   let rejectEmailScope = false;
@@ -563,4 +572,45 @@ test("dashboard reads and mutations normalize their main-use contract, and only 
       ["POST", `/v1/tenants/${tenantId}/customer-email`],
     ],
   );
+});
+
+test("the dashboard SDK probe requires every dashboard method", () => {
+  const fn = async () => ({});
+  const complete = {
+    profile: { get: fn },
+    workspaces: { list: fn },
+    customerEmail: { get: fn, set: fn },
+    operatorConversations: {
+      list: fn,
+      get: fn,
+      messages: fn,
+      reply: fn,
+      setStatus: fn,
+    },
+  };
+  assert.equal(sdkSupportsDashboard(complete), true);
+  // A 0.5.0-shaped client has the operator list/messages/reply only.
+  assert.equal(
+    sdkSupportsDashboard({
+      operatorConversations: { list: fn, messages: fn, reply: fn },
+    }),
+    false,
+  );
+  for (const [namespace, method] of [
+    ["profile", "get"],
+    ["workspaces", "list"],
+    ["customerEmail", "set"],
+    ["operatorConversations", "get"],
+    ["operatorConversations", "setStatus"],
+  ] as const) {
+    const partial: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(complete))
+      partial[key] = { ...value };
+    delete partial[namespace]![method];
+    assert.equal(
+      sdkSupportsDashboard(partial),
+      false,
+      `${namespace}.${method}`,
+    );
+  }
 });

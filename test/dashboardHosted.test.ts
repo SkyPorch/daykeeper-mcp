@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sdkSupportsDashboard } from "../src/sdkDashboard.ts";
 import { createDashboardHostedHandler } from "../src/dashboardHosted.ts";
 
 const welcomeMessage =
@@ -226,7 +227,11 @@ test("an inactive token falls back to a data-free tool sign-in challenge", async
   assert.equal(introspections, 1);
 });
 
-test("limited grants challenge dashboard reads before API access, then work after read-scope upgrade", async (context) => {
+test("candidate SDK: limited grants challenge dashboard reads before API access, then work after read-scope upgrade", async (context) => {
+  if (!sdkSupportsDashboard()) {
+    context.skip("installed SDK does not expose the dashboard methods");
+    return;
+  }
   const grantedScopes = ["daykeeper.accounts:read"];
   const apiRequests: string[] = [];
   context.mock.method(
@@ -400,7 +405,11 @@ test("limited grants challenge dashboard reads before API access, then work afte
   );
 });
 
-test("authenticated startup discovery is static during a concurrent host burst", async (context) => {
+test("candidate SDK: authenticated startup discovery is static during a concurrent host burst", async (context) => {
+  if (!sdkSupportsDashboard()) {
+    context.skip("installed SDK does not expose the dashboard methods");
+    return;
+  }
   let introspections = 0;
   let exchanges = 0;
   let profileReads = 0;
@@ -552,7 +561,11 @@ test("authenticated startup discovery is static during a concurrent host burst",
   assert.equal(profileReads, 1);
 });
 
-test("hosted dashboard accepts 20 concurrent authenticated calls for one principal", async (context) => {
+test("candidate SDK: hosted dashboard accepts 20 concurrent authenticated calls for one principal", async (context) => {
+  if (!sdkSupportsDashboard()) {
+    context.skip("installed SDK does not expose the dashboard methods");
+    return;
+  }
   const concurrentCalls = 20;
   let introspections = 0;
   let exchanges = 0;

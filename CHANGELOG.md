@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-10-12
 
 ### Added
 
@@ -17,9 +17,11 @@
 
 ### Contract
 
-- Uses `@skyporch/daykeeper` 0.6.0 on management contract 1.9.0 (tag `v1.9.0`,
-  `316497e`). The hosted dashboard refuses to start, and its tools answer
-  `SDK_TOO_OLD`, with an older SDK.
+- Consumes the Daykeeper MANAGEMENT contract 1.9.0 (tag `v1.9.0`, additive)
+  via `@skyporch/daykeeper` 0.6.0. See `COMPATIBILITY.md` for the contract tag
+  and commit. The hosted dashboard needs a server implementing 1.9.0
+  (SkyPorch/daykeeper#313); it refuses to start, and its tools answer
+  `SDK_TOO_OLD`, with an older SDK. The stdio tools are unchanged.
 
 ## 0.3.0
 

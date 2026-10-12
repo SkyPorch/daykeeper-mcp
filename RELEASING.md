@@ -8,8 +8,9 @@ OIDC workflow.
 ## Provenance status
 
 `@skyporch/daykeeper-mcp@0.2.0` was the one-time owner-authenticated bootstrap
-publish (`--provenance=false`), so it has no attestation. 0.3.0 is the first
-version expected to go through `release.yml` and carry one.
+publish (`--provenance=false`), so it has no attestation. 0.3.0 was the first
+version published through `release.yml` and carries an SLSA provenance
+attestation; later versions follow the same path.
 
 The sibling packages `@skyporch/daykeeper@0.1.0` and
 `@skyporch/daykeeper-react-native@0.1.0` were published **by hand**, with no

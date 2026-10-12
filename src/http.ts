@@ -4,11 +4,13 @@ import {
   createMcpHandler,
   getOAuthProtectedResourceMetadataUrl,
   hostHeaderValidationResponse,
+  isJsonContentType,
   oauthMetadataResponse,
   originValidationResponse,
   type AuthInfo,
   type McpHttpHandler,
   type OAuthMetadata,
+  type McpServer,
   type ServerEventBus,
   type ServerNotifier,
 } from "@modelcontextprotocol/server";
@@ -33,6 +35,15 @@ const MAX_PRINCIPAL_ID_BYTES = 256;
 const MAX_SCOPE_COUNT = 64;
 const MAX_SCOPE_BYTES = 128;
 const MAX_RECENT_DOWNSTREAM_BINDINGS = 4_096;
+// Keep startup RPC work cheap, but queue a bounded host-startup burst instead
+// of making the authenticated API concurrency limit reject it immediately.
+const MAX_STATIC_DISCOVERY_QUEUE = 256;
+const STATIC_DISCOVERY_METHODS = new Set([
+  "initialize",
+  "notifications/initialized",
+  "ping",
+  "tools/list",
+]);
 const CORS_REQUEST_HEADERS = [
   "authorization",
   "content-type",
@@ -110,6 +121,13 @@ export interface DaykeeperMcpHttpOptions {
     | DaykeeperMcpHttpPrincipal
     | null
     | Promise<DaykeeperMcpHttpPrincipal | null>;
+  /** Optional product-specific server builder; the HTTP security boundary stays shared. */
+  readonly createServer?: (
+    principal: Readonly<DaykeeperMcpHttpPrincipal>,
+    runtime: DaykeeperMcpRuntime,
+  ) => McpServer;
+  /** Optional, product-specific stateless MCP surface for safe pre-auth discovery. */
+  readonly createAnonymousServer?: (runtime: DaykeeperMcpRuntime) => McpServer;
   /** Hostnames only. The canonical resource hostname must be included. */
   readonly allowedHostnames: readonly string[];
   /** Exact HTTPS origins allowed to call the MCP endpoint from a browser. */
@@ -126,6 +144,22 @@ export interface DaykeeperMcpHttpOptions {
   readonly maxConcurrentAuthentications?: number;
   readonly maxConcurrentRequestsPerPrincipal?: number;
   readonly onerror?: (message: string) => void;
+  /** Aggregate outcome and latency for authenticated and anonymous discovery requests. */
+  readonly onDiscoveryMetric?: (metric: DaykeeperDiscoveryMetric) => void;
+}
+
+export type DaykeeperDiscoveryOperation =
+  | "initialize"
+  | "notifications/initialized"
+  | "ping"
+  | "tools/list"
+  | "resources/list"
+  | "resources/templates/list";
+
+export interface DaykeeperDiscoveryMetric {
+  readonly operation: DaykeeperDiscoveryOperation;
+  readonly outcome: "success" | "failure";
+  readonly durationMs: number;
 }
 
 export interface DaykeeperMcpHttpHandler {
@@ -133,6 +167,34 @@ export interface DaykeeperMcpHttpHandler {
   readonly close: () => Promise<void>;
   readonly notify: ServerNotifier;
   readonly bus: ServerEventBus;
+}
+
+type StaticDiscoveryWaiter = {
+  readonly signal: AbortSignal;
+  readonly resolve: (release: (() => void) | null | "cancelled") => void;
+  settled: boolean;
+  abort: () => void;
+};
+
+type PreparedAnonymousRequest = {
+  readonly bounded: Request;
+  readonly parsedBody?: unknown;
+  readonly hasParsedBody?: boolean;
+  readonly release?: () => void;
+};
+
+export class DaykeeperMcpInvalidTokenError extends Error {
+  constructor() {
+    super("The MCP access token is invalid or expired.");
+    this.name = "DaykeeperMcpInvalidTokenError";
+  }
+}
+
+export class DaykeeperMcpAuthenticationUnavailableError extends Error {
+  constructor() {
+    super("MCP token verification is temporarily unavailable.");
+    this.name = "DaykeeperMcpAuthenticationUnavailableError";
+  }
 }
 
 interface ValidatedHttpOptions {
@@ -201,19 +263,81 @@ export function createDaykeeperMcpHttpHandler(
   const lifetime = new AbortController();
   let authenticating = 0;
   let inFlight = 0;
+  let anonymousInFlight = 0;
+  let staticDiscoveryInFlight = 0;
+  const staticDiscoveryWaiters: StaticDiscoveryWaiter[] = [];
   let closed = false;
   const verifyAccessToken = options.verifier.verifyAccessToken.bind(
     options.verifier,
   );
   const resolvePrincipal = options.resolvePrincipal;
   const reportError = options.onerror;
+  const reportDiscoveryMetric = options.onDiscoveryMetric;
+  const admitAnonymous = (): (() => void) | null => {
+    if (inFlight + anonymousInFlight >= config.maxConcurrentRequests)
+      return null;
+    anonymousInFlight++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      anonymousInFlight--;
+    };
+  };
+  const acquireStaticDiscovery = (
+    signal: AbortSignal,
+  ): Promise<(() => void) | null | "cancelled"> => {
+    if (signal.aborted) return Promise.resolve("cancelled");
+    if (staticDiscoveryInFlight < config.maxConcurrentRequests) {
+      staticDiscoveryInFlight++;
+      return Promise.resolve(createStaticDiscoveryRelease());
+    }
+    if (staticDiscoveryWaiters.length >= MAX_STATIC_DISCOVERY_QUEUE)
+      return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const waiter: StaticDiscoveryWaiter = {
+        signal,
+        resolve,
+        settled: false,
+        abort: () => {
+          if (waiter.settled) return;
+          waiter.settled = true;
+          const index = staticDiscoveryWaiters.indexOf(waiter);
+          if (index >= 0) staticDiscoveryWaiters.splice(index, 1);
+          signal.removeEventListener("abort", waiter.abort);
+          resolve("cancelled");
+        },
+      };
+      staticDiscoveryWaiters.push(waiter);
+      signal.addEventListener("abort", waiter.abort, { once: true });
+      if (signal.aborted) waiter.abort();
+    });
+  };
+  const createStaticDiscoveryRelease = (): (() => void) => {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      while (staticDiscoveryWaiters.length > 0) {
+        const waiter = staticDiscoveryWaiters.shift()!;
+        if (waiter.settled) continue;
+        waiter.settled = true;
+        waiter.signal.removeEventListener("abort", waiter.abort);
+        waiter.resolve(createStaticDiscoveryRelease());
+        return;
+      }
+      staticDiscoveryInFlight--;
+    };
+  };
 
   const handler: McpHttpHandler = createMcpHandler(
     ({ authInfo }) => {
       const principal = authInfo && principals.get(authInfo);
       if (!principal)
         throw new Error("Authenticated principal context was unavailable.");
-      return createDaykeeperMcpServerForRuntime(principal.daykeeper, runtime);
+      return options.createServer
+        ? options.createServer(principal, runtime)
+        : createDaykeeperMcpServerForRuntime(principal.daykeeper, runtime);
     },
     {
       legacy: "stateless",
@@ -221,6 +345,13 @@ export function createDaykeeperMcpHttpHandler(
       onerror: () => reportError?.("Daykeeper MCP request failed."),
     },
   );
+  const anonymousHandler = options.createAnonymousServer
+    ? createMcpHandler(() => options.createAnonymousServer!(runtime), {
+        legacy: "stateless",
+        maxSubscriptions: 0,
+        onerror: () => reportError?.("Daykeeper MCP discovery request failed."),
+      })
+    : undefined;
   const fetch = async (request: Request): Promise<Response> => {
     const hostRejection = hostHeaderValidationResponse(
       request,
@@ -272,12 +403,89 @@ export function createDaykeeperMcpHttpHandler(
     )
       return withCors(safeResponse(413, "MCP request is too large."), origin);
 
+    const requestSignal = AbortSignal.any([request.signal, lifetime.signal]);
     const bearer = parseBearer(request.headers.get("authorization"));
-    if (bearer === null)
+    let preparedRequest: Request | undefined;
+    let preparedBody: unknown;
+    let hasPreparedBody = false;
+    const preparedForAnonymous = (): PreparedAnonymousRequest | undefined =>
+      preparedRequest
+        ? {
+            bounded: preparedRequest,
+            ...(hasPreparedBody
+              ? { parsedBody: preparedBody, hasParsedBody: true }
+              : {}),
+          }
+        : undefined;
+    if (
+      anonymousHandler &&
+      request.method.toUpperCase() === "POST" &&
+      isJsonContentType(request.headers.get("content-type"))
+    ) {
+      const releaseStatic = await acquireStaticDiscovery(requestSignal);
+      if (releaseStatic === "cancelled")
+        return withCors(
+          safeResponse(499, "MCP request was cancelled."),
+          origin,
+        );
+      if (!releaseStatic) return withCors(concurrencyResponse(), origin);
+      let keepStaticAdmission = false;
+      try {
+        const bounded = await boundedRequest(
+          request,
+          config.maxRequestBytes,
+          config.requestReadTimeoutMs,
+          requestSignal,
+        );
+        if (bounded instanceof Response) return withCors(bounded, origin);
+        preparedRequest = bounded;
+        try {
+          preparedBody = await bounded.clone().json();
+          hasPreparedBody = true;
+        } catch {
+          // Preserve the SDK's normal parse error response after authentication.
+        }
+        const method = hasPreparedBody
+          ? objectField(preparedBody, "method")
+          : undefined;
+        if (
+          bearer === null ||
+          (typeof method === "string" && STATIC_DISCOVERY_METHODS.has(method))
+        ) {
+          keepStaticAdmission = true;
+          return await dispatchAnonymous(
+            request,
+            anonymousHandler,
+            config,
+            origin,
+            admitAnonymous,
+            lifetime.signal,
+            reportError,
+            reportDiscoveryMetric,
+            { ...preparedForAnonymous()!, release: releaseStatic },
+          );
+        }
+      } finally {
+        if (!keepStaticAdmission) releaseStatic();
+      }
+    }
+    if (bearer === null) {
+      if (anonymousHandler)
+        return dispatchAnonymous(
+          request,
+          anonymousHandler,
+          config,
+          origin,
+          admitAnonymous,
+          lifetime.signal,
+          reportError,
+          reportDiscoveryMetric,
+          preparedForAnonymous(),
+        );
       return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+    }
     if (authenticating >= config.maxConcurrentAuthentications)
       return withCors(concurrencyResponse(), origin);
-    const requestSignal = AbortSignal.any([request.signal, lifetime.signal]);
     authenticating++;
     const verification = beginInterruptible(
       (signal) =>
@@ -307,8 +515,32 @@ export function createDaykeeperMcpHttpHandler(
         ),
         origin,
       );
-    if (verificationOutcome.kind === "error")
+    if (verificationOutcome.kind === "error") {
+      if (
+        verificationOutcome.error instanceof
+        DaykeeperMcpAuthenticationUnavailableError
+      )
+        return withCors(
+          safeResponse(503, "MCP authentication is unavailable."),
+          origin,
+        );
+      if (
+        verificationOutcome.error instanceof DaykeeperMcpInvalidTokenError &&
+        anonymousHandler
+      )
+        return dispatchAnonymous(
+          request,
+          anonymousHandler,
+          config,
+          origin,
+          admitAnonymous,
+          lifetime.signal,
+          reportError,
+          reportDiscoveryMetric,
+          preparedForAnonymous(),
+        );
       return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+    }
     let auth: DaykeeperMcpVerifiedAuthInfo;
     try {
       auth = validateVerifiedAuth(
@@ -326,10 +558,22 @@ export function createDaykeeperMcpHttpHandler(
           ),
           origin,
         );
-      return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+      return anonymousHandler
+        ? dispatchAnonymous(
+            request,
+            anonymousHandler,
+            config,
+            origin,
+            admitAnonymous,
+            lifetime.signal,
+            reportError,
+            reportDiscoveryMetric,
+            preparedForAnonymous(),
+          )
+        : withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
     }
 
-    if (inFlight >= config.maxConcurrentRequests)
+    if (inFlight + anonymousInFlight >= config.maxConcurrentRequests)
       return withCors(concurrencyResponse(), origin);
     inFlight++;
     let principal: DaykeeperMcpHttpPrincipal | null = null;
@@ -337,6 +581,9 @@ export function createDaykeeperMcpHttpHandler(
     let releaseDownstreamBinding: (() => void) | undefined;
     let released = false;
     let releaseInFinally = true;
+    let discoveryOperation: DaykeeperDiscoveryOperation | undefined;
+    let discoveryOutcome: DaykeeperDiscoveryMetric["outcome"] = "failure";
+    let discoveryStartedAt = performance.now();
     const releaseAdmission = () => {
       if (released) return;
       released = true;
@@ -397,14 +644,23 @@ export function createDaykeeperMcpHttpHandler(
       principalAdmitted = true;
       principals.set(auth, principal);
 
-      const bounded = await boundedRequest(
-        request,
-        config.maxRequestBytes,
-        config.requestReadTimeoutMs,
-        requestSignal,
-      );
+      const bounded =
+        preparedRequest ??
+        (await boundedRequest(
+          request,
+          config.maxRequestBytes,
+          config.requestReadTimeoutMs,
+          requestSignal,
+        ));
       if (bounded instanceof Response) return withCors(bounded, origin);
-      const response = await handler.fetch(bounded, { authInfo: auth });
+      if (reportDiscoveryMetric) {
+        discoveryOperation = await discoveryOperationFromRequest(bounded);
+        discoveryStartedAt = performance.now();
+      }
+      const response = await handler.fetch(bounded, {
+        authInfo: auth,
+        ...(hasPreparedBody ? { parsedBody: preparedBody } : {}),
+      });
       principals.delete(auth);
       const boundedOutput = boundedResponse(
         response,
@@ -414,6 +670,11 @@ export function createDaykeeperMcpHttpHandler(
         releaseAdmission,
       );
       if (boundedOutput.ownsAdmission) releaseInFinally = false;
+      discoveryOutcome =
+        boundedOutput.response.status >= 200 &&
+        boundedOutput.response.status < 300
+          ? "success"
+          : "failure";
       return withCors(boundedOutput.response, origin);
     } catch {
       reportError?.("Daykeeper MCP request could not be completed.");
@@ -423,6 +684,13 @@ export function createDaykeeperMcpHttpHandler(
       );
     } finally {
       principals.delete(auth);
+      if (discoveryOperation)
+        recordDiscoveryMetric(
+          reportDiscoveryMetric,
+          discoveryOperation,
+          discoveryOutcome,
+          Math.max(0, performance.now() - discoveryStartedAt),
+        );
       if (releaseInFinally) releaseAdmission();
     }
   };
@@ -436,14 +704,161 @@ export function createDaykeeperMcpHttpHandler(
       closed = true;
       lifetime.abort(new Error("Daykeeper MCP handler closed."));
       await handler.close();
+      await anonymousHandler?.close();
       downstreamBindings.clear();
     },
   });
 }
 
+async function dispatchAnonymous(
+  request: Request,
+  handler: McpHttpHandler,
+  config: ValidatedHttpOptions,
+  origin: string | null,
+  admit: () => (() => void) | null,
+  lifetimeSignal: AbortSignal,
+  reportError: DaykeeperMcpHttpOptions["onerror"],
+  reportDiscoveryMetric: DaykeeperMcpHttpOptions["onDiscoveryMetric"],
+  prepared?: PreparedAnonymousRequest,
+): Promise<Response> {
+  const release = prepared?.release ?? admit();
+  if (!release) return withCors(concurrencyResponse(), origin);
+  let releaseInFinally = true;
+  let discoveryOperation: DaykeeperDiscoveryOperation | undefined;
+  let discoveryOutcome: DaykeeperDiscoveryMetric["outcome"] = "failure";
+  const startedAt = performance.now();
+  try {
+    const signal = AbortSignal.any([request.signal, lifetimeSignal]);
+    const bounded =
+      prepared?.bounded ??
+      (await boundedRequest(
+        request,
+        config.maxRequestBytes,
+        config.requestReadTimeoutMs,
+        signal,
+      ));
+    if (bounded instanceof Response) return withCors(bounded, origin);
+    let message: unknown;
+    if (prepared?.hasParsedBody) {
+      message = prepared.parsedBody;
+    } else {
+      try {
+        message = await bounded.clone().json();
+      } catch {
+        return withCors(
+          safeResponse(400, "MCP request body is invalid."),
+          origin,
+        );
+      }
+    }
+    const method = objectField(message, "method");
+    const params = objectField(message, "params");
+    if (
+      method === "initialize" ||
+      method === "notifications/initialized" ||
+      method === "ping" ||
+      method === "tools/list" ||
+      method === "resources/list" ||
+      method === "resources/templates/list"
+    )
+      discoveryOperation = method;
+    if (
+      method === "resources/read" ||
+      method === "resources/subscribe" ||
+      method === "resources/unsubscribe"
+    )
+      return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+    const permitted = new Set([
+      "initialize",
+      "notifications/initialized",
+      "ping",
+      "tools/list",
+      "resources/list",
+      "resources/templates/list",
+      "tools/call",
+    ]);
+    if (typeof method !== "string" || !permitted.has(method))
+      return withCors(invalidTokenResponse(config.resourceMetadataUrl), origin);
+    if (method === "tools/call") {
+      if (typeof objectField(params, "name") !== "string")
+        return withCors(safeResponse(400, "MCP tool call is invalid."), origin);
+    }
+    const boundedOutput = boundedResponse(
+      await handler.fetch(
+        bounded,
+        prepared?.hasParsedBody ? { parsedBody: message } : undefined,
+      ),
+      config.maxResponseBytes,
+      config.responseReadTimeoutMs,
+      signal,
+      release,
+    );
+    if (boundedOutput.ownsAdmission) releaseInFinally = false;
+    discoveryOutcome =
+      boundedOutput.response.status >= 200 &&
+      boundedOutput.response.status < 300
+        ? "success"
+        : "failure";
+    return withCors(boundedOutput.response, origin);
+  } catch {
+    reportError?.("Daykeeper MCP discovery request failed.");
+    return withCors(
+      safeResponse(503, "MCP request could not be completed."),
+      origin,
+    );
+  } finally {
+    if (discoveryOperation)
+      recordDiscoveryMetric(
+        reportDiscoveryMetric,
+        discoveryOperation,
+        discoveryOutcome,
+        Math.max(0, performance.now() - startedAt),
+      );
+    if (releaseInFinally) release();
+  }
+}
+
+async function discoveryOperationFromRequest(
+  request: Request,
+): Promise<DaykeeperDiscoveryOperation | undefined> {
+  try {
+    const message = (await request.clone().json()) as Record<string, unknown>;
+    const method = message.method;
+    return method === "initialize" ||
+      method === "notifications/initialized" ||
+      method === "ping" ||
+      method === "tools/list" ||
+      method === "resources/list" ||
+      method === "resources/templates/list"
+      ? method
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recordDiscoveryMetric(
+  callback: DaykeeperMcpHttpOptions["onDiscoveryMetric"],
+  operation: DaykeeperDiscoveryOperation,
+  outcome: DaykeeperDiscoveryMetric["outcome"],
+  durationMs: number,
+): void {
+  try {
+    callback?.({ operation, outcome, durationMs });
+  } catch {
+    // Metrics are aggregate-only and never affect the MCP response.
+  }
+}
+
+function objectField(value: unknown, key: string): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return undefined;
+  return (value as Record<string, unknown>)[key];
+}
+
 type InterruptibleOutcome<Value> =
   | { readonly kind: "value"; readonly value: Value }
-  | { readonly kind: "error" }
+  | { readonly kind: "error"; readonly error: unknown }
   | { readonly kind: "timeout" }
   | { readonly kind: "aborted" };
 
@@ -479,7 +894,7 @@ function beginInterruptible<Value>(
     .then(() => work(controller.signal))
     .then(
       (value) => ({ kind: "value", value }) as const,
-      () => ({ kind: "error" }) as const,
+      (error: unknown) => ({ kind: "error", error }) as const,
     );
   const settled = settledOutcome.then(() => undefined);
   const outcome = Promise.race([settledOutcome, interrupted]).finally(() => {

@@ -6,6 +6,8 @@ import {
 } from "./server.ts";
 export {
   createDaykeeperMcpHttpHandler,
+  DaykeeperMcpAuthenticationUnavailableError,
+  DaykeeperMcpInvalidTokenError,
   MAX_HTTP_AUTHENTICATION_MS,
   MAX_HTTP_CONCURRENT_AUTHENTICATIONS,
   MAX_HTTP_CONCURRENT_REQUESTS,
@@ -16,6 +18,8 @@ export {
   MAX_HTTP_RESPONSE_BYTES,
 } from "./http.ts";
 export type {
+  DaykeeperDiscoveryMetric,
+  DaykeeperDiscoveryOperation,
   DaykeeperMcpHttpHandler,
   DaykeeperMcpHttpOptions,
   DaykeeperMcpHttpPrincipal,
@@ -32,6 +36,12 @@ export {
   ENVELOPE_VERSION,
 } from "./config.ts";
 export type { DaykeeperMcpOptions } from "./config.ts";
+export { createDashboardMcpServer } from "./dashboardServer.ts";
+export {
+  createDashboardHostedHandler,
+  DASHBOARD_SCOPES,
+} from "./dashboardHosted.ts";
+export type { DashboardHostedOptions } from "./dashboardHosted.ts";
 
 /** One local stdio instance per configured credential. This is not an HTTP authentication gateway. */
 export function createDaykeeperMcpServer(

@@ -17,11 +17,9 @@
 
 ### Contract
 
-- The dashboard needs `@skyporch/daykeeper` 0.6.0 (management contract 1.9.0,
-  SkyPorch/daykeeper-node#40, unreleased). The release dependency stays at
-  0.3.0; the dashboard refuses to start and its tools answer `SDK_TOO_OLD`
-  until 0.6.0 is installed. Repin CI's SDK candidate and the dependency to the
-  released SDK before publishing.
+- Uses `@skyporch/daykeeper` 0.6.0 on management contract 1.9.0 (tag `v1.9.0`,
+  `316497e`). The hosted dashboard refuses to start, and its tools answer
+  `SDK_TOO_OLD`, with an older SDK.
 
 ## 0.3.0
 

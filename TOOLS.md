@@ -1,7 +1,7 @@
 # Daykeeper MCP tool contract
 
-Adapter envelope version 1.0; local tools consume published management SDK 0.3.0.
-The unreleased hosted dashboard (`daykeeper-dashboard-mcp`) needs SDK 0.6.0.
+Adapter envelope version 1.0; tools consume published management SDK 0.6.0
+(the hosted dashboard, `daykeeper-dashboard-mcp`, requires it).
 Tools pass validated
 inputs to that SDK; they do not bypass the API or issue SQL/provider requests.
 All inputs are strict objects. Resource identifiers are exact UUIDs and

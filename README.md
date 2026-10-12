@@ -122,7 +122,7 @@ an explicit idempotency key for apply. No tool invents a plan, confirmation,
 organization, role, scope or billing approval on behalf of the caller.
 
 Local flags and MCP annotations are safety hints, not authorization. Every tool
-uses the pinned `@skyporch/daykeeper@0.3.0` client against the configured API
+uses the pinned `@skyporch/daykeeper@0.6.0` client against the configured API
 which must enforce current principal status, scopes, tenant ownership and
 quotas. Do not share one adapter process/credential between untrusted principals.
 Returned customer names, descriptions and flow text are untrusted data, not
@@ -206,17 +206,16 @@ Dashboard ChatGPT app (`DAYKEEPER_DASHBOARD_MCP_ENABLED=true`). It verifies
 each MCP access token by introspection against the configured Daykeeper API,
 exchanges it for a separate API-resource token, and exposes ten
 connection-bound tools; see `docs/daykeeper-dashboard-tool-contract.md`. It
-needs `@skyporch/daykeeper` 0.6.0 (contract 1.9.0) and refuses to start with an
-older SDK; the published package still depends on 0.3.0 until that SDK is
-released. The stdio `daykeeper-mcp` command and its tools are unchanged.
+needs `@skyporch/daykeeper` 0.6.0 (contract 1.9.0), the pinned dependency, and
+refuses to start with an older SDK. The stdio `daykeeper-mcp` command and its
+tools are unchanged.
 
 ## Programmatic inbox onboarding
 
 The `@skyporch/daykeeper@0.2.0` dependency adds generic inbox, website inbox and
-tenant provisioning and activation methods. CI's `sdk-candidate` job currently
-packs `SkyPorch/daykeeper-node` commit `665cd7e4eed5d17f2004dcce673fa4bd9dce82e0`
-(main after PR #40, the unreleased SDK 0.6.0) for the hosted dashboard; it must
-be repinned to the released `v0.6.0` tag before an MCP release.
+tenant provisioning and activation methods. CI's `sdk-candidate` job packs
+`SkyPorch/daykeeper-node` commit `569a4ba92f257070fcbbaa636ba1c81583574c2d`
+(tag `v0.6.0`, the published SDK 0.6.0) separately.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.
 
@@ -268,7 +267,7 @@ runtime for the platform's isolated connected journey:
 
 ```sh
 node scripts/prepare-connected-mcp.mjs \
-  /absolute/skyporch-daykeeper-0.3.0.tgz \
+  /absolute/skyporch-daykeeper-0.6.0.tgz \
   /absolute/fresh-mcp-runtime
 ```
 

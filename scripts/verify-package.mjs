@@ -18,7 +18,7 @@ import { toolEnvironment } from "./tooling.mjs";
 const manifest = JSON.parse(await readFile("package.json", "utf8"));
 assert.equal(manifest.name, "@skyporch/daykeeper-mcp");
 assert.equal(manifest.license, "Apache-2.0");
-assert.equal(manifest.dependencies["@skyporch/daykeeper"], "0.6.0");
+assert.equal(manifest.dependencies["@skyporch/daykeeper"], "0.7.0");
 assert.equal(manifest.dependencies["@modelcontextprotocol/server"], "2.0.0");
 for (const group of [
   manifest.dependencies,

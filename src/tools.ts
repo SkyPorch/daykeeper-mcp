@@ -241,9 +241,12 @@ const claimEmail = z
       .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
   )
   .describe(
-    "The work email of the person who should own this workspace, exactly as they gave it to you. They must sign in with this address to claim it.",
+    "The work email of the person who should own this workspace, exactly as they gave it to you. They must sign in with this address to claim it. Leave it out to get an open link instead, which makes whoever opens it first an owner.",
   );
-const claimCreate = z.strictObject({ email: claimEmail, idempotencyKey });
+const claimCreate = z.strictObject({
+  email: claimEmail.optional(),
+  idempotencyKey,
+});
 const claimRevoke = z.strictObject({ claimId: resourceId });
 const claimTool = (metadata: ToolMetadata): ToolMetadata => ({
   ...metadata,
@@ -273,7 +276,7 @@ const definitions: readonly ToolDefinition[] = [
     claimTool({
       ...change(
         "daykeeper_workspace_claims_create",
-        "Give a person owner access to the workspace this agent created: returns a one-time link to send them and a message to relay. Use only an address the person gave you for this. Requires an explicit idempotency key; reuse it to retry, and call daykeeper_workspace_claims_list after an uncertain result. A replay returns the claim without its link; revoke it and create with a new key to send a new link.",
+        "Give a person owner access to the workspace this agent created: returns a one-time link to send them and a message to relay. With an email (only one the person gave you for this) only that address can accept it; without one it is an open link that whoever opens it first can accept, so give it only to your person. Until somebody claims the workspace, customer messages reach only this agent. Requires an explicit idempotency key; reuse it to retry, and call daykeeper_workspace_claims_list after an uncertain result. A replay returns the claim without its link; revoke it and create with a new key to send a new link.",
         "mutation",
         ["daykeeper.accounts:write"],
         true,
@@ -284,10 +287,10 @@ const definitions: readonly ToolDefinition[] = [
     async (client, input, signal) =>
       projectClaimCreate(
         await claimSdk(client).workspaceClaims.create(
-          { email: input.email },
+          input.email === undefined ? {} : { email: input.email },
           { idempotencyKey: input.idempotencyKey, signal },
         ),
-        input.email,
+        input.email ?? null,
       ),
   ),
   define(
@@ -861,7 +864,8 @@ function projectClaim(value: unknown): Record<string, unknown> {
   const parsed = z
     .object({
       id: resourceId,
-      email: z.string().min(3).max(254),
+      // Null while an open claim (contract 1.10.0) is pending or revoked.
+      email: z.string().min(3).max(254).nullable(),
       role: z.literal("owner"),
       state: z.enum(["pending", "accepted", "revoked"]),
       expiresAt: z.string().min(1).max(64),
@@ -892,16 +896,19 @@ function projectClaimList(value: unknown): Record<string, unknown> {
  */
 function projectClaimCreate(
   value: unknown,
-  email: string,
+  email: string | null,
 ): Record<string, unknown> {
   const record = (value ?? {}) as Record<string, unknown>;
   const claim = projectClaim(record.claim);
-  if (claim.email !== email)
+  const replayed = record.replayed === true;
+  // An open claim reads back with no address, except a replay of one somebody
+  // already accepted, which carries the accepting address.
+  const openAccepted = email === null && replayed && claim.state === "accepted";
+  if (openAccepted ? typeof claim.email !== "string" : claim.email !== email)
     throw new McpAdapterError(
       "INVALID_API_RESPONSE",
       "The API did not return the expected workspace claim.",
     );
-  const replayed = record.replayed === true;
   const claimUrl = record.claimUrl;
   if (
     replayed
@@ -917,15 +924,27 @@ function projectClaimCreate(
     );
   const emailed = record.emailed === true;
   const expires = describeClaimExpiry(String(claim.expiresAt));
-  const message = replayed
-    ? `A claim for ${email} is already waiting and expires ${expires}. Its link is only returned when it is issued. To send a new link, revoke this claim with daykeeper_workspace_claims_revoke, then create one with a new idempotency key.`
-    : [
-        emailed
-          ? `Daykeeper emailed this link to ${email}; you can also send it yourself.`
-          : `Send this link to ${email}.`,
-        `It works once, only for someone signed in as ${email}, and expires ${expires}.`,
-        "They sign in to Daykeeper with that address and become an owner of this workspace. This agent keeps working.",
-      ].join(" ");
+  // The real reason to claim, said first so it is relayed first.
+  const consequence =
+    "Your Daykeeper inbox is live. Until someone claims it, customer messages reach only your AI agent and nobody is emailed about them.";
+  const message = openAccepted
+    ? `${claim.email} claimed this workspace and owns it now. This agent keeps working.`
+    : replayed
+      ? `${email === null ? "An open claim link" : `A claim for ${email}`} is already waiting and expires ${expires}. Its link is only returned when it is issued. To send a new link, revoke this claim with daykeeper_workspace_claims_revoke, then create one with a new idempotency key.`
+      : email === null
+        ? [
+            consequence,
+            `To own it, open this link and sign in: ${String(claimUrl)}`,
+            `It works once, for whoever opens it first, and expires ${expires}.`,
+          ].join(" ")
+        : [
+            consequence,
+            emailed
+              ? `Daykeeper emailed this link to ${email}; you can also send it yourself.`
+              : `Send this link to ${email}.`,
+            `It works once, only for someone signed in as ${email}, and expires ${expires}.`,
+            "They sign in to Daykeeper with that address and become an owner of this workspace. This agent keeps working.",
+          ].join(" ");
   return {
     claim,
     claimUrl: replayed ? null : claimUrl,

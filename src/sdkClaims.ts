@@ -6,7 +6,8 @@ export const REQUIRED_CLAIM_SDK_VERSION = "0.3.0";
 export interface ClaimSdk {
   workspaceClaims: {
     create(
-      input: { email: string },
+      // `{}` is an open claim (SDK 0.7.0, contract 1.10.0).
+      input: { email?: string },
       options: { idempotencyKey: string; signal?: AbortSignal },
     ): Promise<unknown>;
     list(options?: { signal?: AbortSignal }): Promise<unknown>;

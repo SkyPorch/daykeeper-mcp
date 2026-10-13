@@ -297,13 +297,18 @@ const definitions: readonly ToolDefinition[] = [
     claimTool(
       read(
         "daykeeper_workspace_claims_list",
-        "List the owner claims this agent issued for its workspace (pending, accepted, revoked; expired ones are hidden). Never returns a link.",
+        "List the owner claims this agent issued for its workspace (pending, accepted, revoked; expired ones are hidden), including open links (email null until somebody accepts one). Never returns a link.",
         ["daykeeper.accounts:read"],
       ),
     ),
     empty,
     async (client, _input, signal) =>
-      projectClaimList(await claimSdk(client).workspaceClaims.list({ signal })),
+      projectClaimList(
+        await claimSdk(client).workspaceClaims.list({
+          signal,
+          includeOpen: true,
+        }),
+      ),
   ),
   define(
     claimTool({

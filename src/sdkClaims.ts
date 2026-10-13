@@ -10,7 +10,11 @@ export interface ClaimSdk {
       input: { email?: string },
       options: { idempotencyKey: string; signal?: AbortSignal },
     ): Promise<unknown>;
-    list(options?: { signal?: AbortSignal }): Promise<unknown>;
+    list(options?: {
+      signal?: AbortSignal;
+      // Lists open claims nobody accepted (SDK 0.7.0, contract 1.10.0).
+      includeOpen?: boolean;
+    }): Promise<unknown>;
     revoke(
       claimId: string,
       options?: { signal?: AbortSignal },

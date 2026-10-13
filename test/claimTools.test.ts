@@ -331,7 +331,7 @@ test("installed SDK: claim create, list and revoke go to the management API unde
     ]),
     [
       ["POST", `${BASE_URL}/v1/workspace-claims`, KEY],
-      ["GET", `${BASE_URL}/v1/workspace-claims`, null],
+      ["GET", `${BASE_URL}/v1/workspace-claims?include=open`, null],
       ["POST", `${BASE_URL}/v1/workspace-claims/${CLAIM}/revoke`, null],
     ],
   );
@@ -363,4 +363,26 @@ test("installed SDK: an uncertain claim says to list claims and reuse the key", 
   assert.equal(result.error?.mutationOutcome, "unknown");
   assert(result.error?.nextActions.includes("list_workspace_claims"));
   assert(result.error?.nextActions.includes("reuse_original_idempotency_key"));
+});
+
+test("the list tool asks for open links and reads their null address", async () => {
+  const seen: unknown[] = [];
+  const result = (await tool(names[1]!).dispatch(
+    {
+      workspaceClaims: {
+        create: async () => created,
+        list: async (options: unknown) => {
+          seen.push(options);
+          return { items: [{ ...claim, email: null }, claim] };
+        },
+        revoke: async () => claim,
+      },
+    } as never,
+    {},
+  )) as { claims: { email: string | null }[] };
+  assert.equal((seen[0] as { includeOpen?: boolean }).includeOpen, true);
+  assert.deepEqual(
+    result.claims.map((item) => item.email),
+    [null, "sam@acme.example"],
+  );
 });

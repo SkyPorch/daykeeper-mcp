@@ -45,7 +45,7 @@ jobs:
         node: ${{ github.event_name == 'pull_request' && fromJSON('[22]') || fromJSON('[20, 22, 24]') }}
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.8.0
       - uses: actions/setup-node@v7
@@ -74,7 +74,7 @@ jobs:
           ref: 569a4ba92f257070fcbbaa636ba1c81583574c2d
           path: sdk-candidate
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.8.0
       - uses: actions/setup-node@v7

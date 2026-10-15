@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install checksum-pinned Gitleaks
@@ -44,11 +44,11 @@ jobs:
         # on main pushes.
         node: ${{ github.event_name == 'pull_request' && fromJSON('[22]') || fromJSON('[20, 22, 24]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.8.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
@@ -63,10 +63,10 @@ jobs:
       matrix:
         node: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: adapter
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: SkyPorch/daykeeper-node
           # Reviewed release candidate, not a mutable branch or published upgrade.
@@ -74,10 +74,10 @@ jobs:
           ref: 569a4ba92f257070fcbbaa636ba1c81583574c2d
           path: sdk-candidate
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.8.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - name: Build trusted candidate artifact
@@ -89,7 +89,7 @@ jobs:
           npm pack --ignore-scripts --pack-destination "${RUNNER_TEMP}/daykeeper-sdk-artifact"
       - name: Retain exact reviewed SDK artifact for cross-repo proof
         if: matrix.node == 22
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: daykeeper-connected-sdk
           path: ${{ runner.temp }}/daykeeper-sdk-artifact/skyporch-daykeeper-0.6.0.tgz

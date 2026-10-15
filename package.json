@@ -69,9 +69,9 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.1.0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "22.20.1",
-    "prettier": "3.9.9",
+    "prettier": "3.9.10",
     "tsup": "8.5.1",
     "tsx": "4.23.15",
     "typescript": "5.9.3"

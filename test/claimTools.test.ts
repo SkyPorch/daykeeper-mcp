@@ -88,16 +88,26 @@ test("the claim SDK probe needs create, list and revoke and never dispatches", (
   };
   assert.equal(
     sdkSupportsClaimTools({
-      workspaceClaims: { create: work, list: work, revoke: work },
+      workspaceClaims: {
+        openClaims: true,
+        create: work,
+        list: work,
+        revoke: work,
+      },
     }),
     true,
   );
-  for (const value of [{}, { workspaceClaims: { create: work, list: work } }]) {
+  // 0.3-0.6 have the same three methods but no open claims: refused.
+  for (const value of [
+    {},
+    { workspaceClaims: { openClaims: true, create: work, list: work } },
+    { workspaceClaims: { create: work, list: work, revoke: work } },
+  ]) {
     assert.equal(sdkSupportsClaimTools(value), false);
     assert.throws(() => assertClaimSdk(value), { code: "SDK_TOO_OLD" });
   }
   assert.equal(calls, 0);
-  // The pinned SDK (0.3.0) ships workspaceClaims.
+  // The pinned SDK (0.7.0) supports open claims.
   assert.equal(sdkSupportsClaimTools(), true);
 });
 
@@ -105,6 +115,7 @@ test("a new claim returns the link and a message to relay; a replay returns neit
   const seen: unknown[][] = [];
   const client = {
     workspaceClaims: {
+      openClaims: true,
       create: async (...args: unknown[]) => {
         seen.push(args);
         return created;
@@ -138,6 +149,7 @@ test("a new claim returns the link and a message to relay; a replay returns neit
   const emailed = (await tool(names[0]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async () => ({ ...created, emailed: true }),
         list: async () => ({ items: [] }),
         revoke: async () => claim,
@@ -151,6 +163,7 @@ test("a new claim returns the link and a message to relay; a replay returns neit
   const replay = (await tool(names[0]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async () => ({
           claim,
           token: null,
@@ -174,6 +187,7 @@ test("without an email the tool issues an open link, and reports who accepted it
   const result = (await tool(names[0]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async (...args: unknown[]) => {
           seen.push(args);
           return { ...created, claim: open };
@@ -200,6 +214,7 @@ test("without an email the tool issues an open link, and reports who accepted it
   const accepted = (await tool(names[0]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async () => ({
           claim: { ...claim, state: "accepted", acceptedAt: claim.createdAt },
           token: null,
@@ -220,6 +235,7 @@ test("without an email the tool issues an open link, and reports who accepted it
     tool(names[0]!).dispatch(
       {
         workspaceClaims: {
+          openClaims: true,
           create: async () => created,
           list: async () => ({ items: [] }),
           revoke: async () => claim,
@@ -238,7 +254,12 @@ test("claim inputs and responses are strict", async () => {
     return created;
   };
   const client = {
-    workspaceClaims: { create: work, list: work, revoke: work },
+    workspaceClaims: {
+      openClaims: true,
+      create: work,
+      list: work,
+      revoke: work,
+    },
   } as never;
   for (const input of [
     { email: "not-an-address", idempotencyKey: KEY },
@@ -261,6 +282,7 @@ test("claim inputs and responses are strict", async () => {
       tool(names[0]!).dispatch(
         {
           workspaceClaims: {
+            openClaims: true,
             create: async () => response,
             list: work,
             revoke: work,
@@ -370,6 +392,7 @@ test("the list tool asks for open links and reads their null address", async () 
   const result = (await tool(names[1]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async () => created,
         list: async (options: unknown) => {
           seen.push(options);

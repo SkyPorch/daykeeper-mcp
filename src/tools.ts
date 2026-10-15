@@ -869,7 +869,7 @@ function projectClaim(value: unknown): Record<string, unknown> {
   const parsed = z
     .object({
       id: resourceId,
-      // Null while an open claim (contract 1.10.0) is pending or revoked.
+      // Null while an open claim (contract 1.12.0) is pending or revoked.
       email: z.string().min(3).max(254).nullable(),
       role: z.literal("owner"),
       state: z.enum(["pending", "accepted", "revoked"]),

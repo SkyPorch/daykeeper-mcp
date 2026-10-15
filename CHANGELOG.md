@@ -2,8 +2,8 @@
 
 ## Unreleased (0.5.0)
 
-Runtime SDK: `@skyporch/daykeeper@0.7.0` (contract `v1.10.0`). Needs a server
-with migration 0119 (`SkyPorch/daykeeper`) for open claims.
+Runtime SDK: `@skyporch/daykeeper@0.7.0` (contract `v1.12.0`). Needs a server
+with migration 0122 (`SkyPorch/daykeeper`) for open claims.
 
 ### Added
 
@@ -19,6 +19,11 @@ with migration 0119 (`SkyPorch/daykeeper`) for open claims.
 - Server instructions tell the agent to hand its person a claim link when the
   workspace is unclaimed, preferring the person's address when it was given.
 - Claims read back with a nullable `email`.
+- Claim tools need `@skyporch/daykeeper` 0.7.0 (`requiredClaimSdkVersion`):
+  an injected client from 0.3-0.6 has the same claim methods but cannot issue
+  open claims, so it is now refused (`SDK_TOO_OLD`) instead of advertised as
+  supported. The gate reads `workspaceClaims.openClaims` and never sends a
+  request.
 
 ## 0.4.0 - 2026-10-12
 

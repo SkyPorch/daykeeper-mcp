@@ -56,7 +56,7 @@ for (const era of ["legacy", "modern"] as const) {
     assert.equal(metadata.flowWritesEnabled, false);
     assert.equal(metadata.claimToolsEnabled, false);
     assert.equal(metadata.claimSdkSupported, true);
-    assert.equal(metadata.requiredClaimSdkVersion, "0.3.0");
+    assert.equal(metadata.requiredClaimSdkVersion, "0.7.0");
     assert.equal(metadata.declaredScopes, null);
     assert.equal(
       metadata.tools.filter((tool: { enabled: boolean }) => tool.enabled)

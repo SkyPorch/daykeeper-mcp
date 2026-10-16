@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased (0.5.0)
+## 0.5.0 - 2026-10-16
 
-Runtime SDK: `@skyporch/daykeeper@0.7.0` (contract `v1.12.0`). Needs a server
-with migration 0122 (`SkyPorch/daykeeper`) for open claims.
+Consumes the Daykeeper MANAGEMENT contract 1.12.0 (tag `v1.12.0`, additive)
+via `@skyporch/daykeeper` 0.7.0. See `COMPATIBILITY.md` for the contract tag
+and commit. Open claims need a server with migration 0122
+(SkyPorch/daykeeper#314).
 
 ### Added
 

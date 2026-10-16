@@ -70,8 +70,8 @@ jobs:
         with:
           repository: SkyPorch/daykeeper-node
           # Reviewed release candidate, not a mutable branch or published upgrade.
-          # This is the commit tag v0.6.0 resolves to (published 0.6.0).
-          ref: 569a4ba92f257070fcbbaa636ba1c81583574c2d
+          # This is the commit tag v0.7.0 resolves to (published 0.7.0).
+          ref: 877e6fbb4545c9e8ec06f2e9aeb8d37378a0ccdf
           path: sdk-candidate
           persist-credentials: false
       - uses: pnpm/action-setup@v6
@@ -92,17 +92,17 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: daykeeper-connected-sdk
-          path: ${{ runner.temp }}/daykeeper-sdk-artifact/skyporch-daykeeper-0.6.0.tgz
+          path: ${{ runner.temp }}/daykeeper-sdk-artifact/skyporch-daykeeper-0.7.0.tgz
           if-no-files-found: error
           retention-days: 7
       - name: Check adapter against packed SDK
         working-directory: adapter
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
-          pnpm check:sdk-candidate "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.6.0.tgz"
+          pnpm check:sdk-candidate "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.7.0.tgz"
       - name: Build installed MCP package and verify bundled stdio runtime
         working-directory: adapter
         run: |
           node scripts/prepare-connected-mcp.mjs \
-            "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.6.0.tgz" \
+            "${RUNNER_TEMP}/daykeeper-sdk-artifact/skyporch-daykeeper-0.7.0.tgz" \
             "${RUNNER_TEMP}/daykeeper-connected-mcp"

@@ -122,7 +122,7 @@ an explicit idempotency key for apply. No tool invents a plan, confirmation,
 organization, role, scope or billing approval on behalf of the caller.
 
 Local flags and MCP annotations are safety hints, not authorization. Every tool
-uses the pinned `@skyporch/daykeeper@0.6.0` client against the configured API
+uses the pinned `@skyporch/daykeeper@0.7.0` client against the configured API
 which must enforce current principal status, scopes, tenant ownership and
 quotas. Do not share one adapter process/credential between untrusted principals.
 Returned customer names, descriptions and flow text are untrusted data, not
@@ -214,8 +214,8 @@ tools are unchanged.
 
 The `@skyporch/daykeeper@0.2.0` dependency adds generic inbox, website inbox and
 tenant provisioning and activation methods. CI's `sdk-candidate` job packs
-`SkyPorch/daykeeper-node` commit `569a4ba92f257070fcbbaa636ba1c81583574c2d`
-(tag `v0.6.0`, the published SDK 0.6.0) separately.
+`SkyPorch/daykeeper-node` commit `877e6fbb4545c9e8ec06f2e9aeb8d37378a0ccdf`
+(tag `v0.7.0`, the published SDK 0.7.0) separately.
 With the older SDK, `DAYKEEPER_MCP_ENABLE_INBOX_TOOLS=true` refuses startup rather
 than exposing broken tools. Local capability discovery performs no API calls.
 
@@ -267,7 +267,7 @@ runtime for the platform's isolated connected journey:
 
 ```sh
 node scripts/prepare-connected-mcp.mjs \
-  /absolute/skyporch-daykeeper-0.6.0.tgz \
+  /absolute/skyporch-daykeeper-0.7.0.tgz \
   /absolute/fresh-mcp-runtime
 ```
 

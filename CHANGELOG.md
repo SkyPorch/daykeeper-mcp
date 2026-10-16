@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 - 2026-10-16
+
+Consumes the Daykeeper MANAGEMENT contract 1.12.0 (tag `v1.12.0`, additive)
+via `@skyporch/daykeeper` 0.7.0. See `COMPATIBILITY.md` for the contract tag
+and commit. Open claims need a server with migration 0122
+(SkyPorch/daykeeper#314).
+
+### Added
+
+- `daykeeper_workspace_claims_create` takes `email` as optional. Without it the
+  tool issues an open claim link that whoever opens it first may accept, and
+  its message says so. A replay of an open claim somebody already accepted
+  reports who owns the workspace now.
+
+### Changed
+
+- Claim messages open with what happens until the workspace is claimed:
+  customer messages reach only the agent and nobody is emailed about them.
+- Server instructions tell the agent to hand its person a claim link when the
+  workspace is unclaimed, preferring the person's address when it was given.
+- Claims read back with a nullable `email`.
+- Claim tools need `@skyporch/daykeeper` 0.7.0 (`requiredClaimSdkVersion`):
+  an injected client from 0.3-0.6 has the same claim methods but cannot issue
+  open claims, so it is now refused (`SDK_TOO_OLD`) instead of advertised as
+  supported. The gate reads `workspaceClaims.openClaims` and never sends a
+  request.
+
 ## 0.4.0 - 2026-10-12
 
 ### Added

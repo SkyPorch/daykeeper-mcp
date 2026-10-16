@@ -88,16 +88,26 @@ test("the claim SDK probe needs create, list and revoke and never dispatches", (
   };
   assert.equal(
     sdkSupportsClaimTools({
-      workspaceClaims: { create: work, list: work, revoke: work },
+      workspaceClaims: {
+        openClaims: true,
+        create: work,
+        list: work,
+        revoke: work,
+      },
     }),
     true,
   );
-  for (const value of [{}, { workspaceClaims: { create: work, list: work } }]) {
+  // 0.3-0.6 have the same three methods but no open claims: refused.
+  for (const value of [
+    {},
+    { workspaceClaims: { openClaims: true, create: work, list: work } },
+    { workspaceClaims: { create: work, list: work, revoke: work } },
+  ]) {
     assert.equal(sdkSupportsClaimTools(value), false);
     assert.throws(() => assertClaimSdk(value), { code: "SDK_TOO_OLD" });
   }
   assert.equal(calls, 0);
-  // The pinned SDK (0.3.0) ships workspaceClaims.
+  // The pinned SDK (0.7.0) supports open claims.
   assert.equal(sdkSupportsClaimTools(), true);
 });
 
@@ -105,6 +115,7 @@ test("a new claim returns the link and a message to relay; a replay returns neit
   const seen: unknown[][] = [];
   const client = {
     workspaceClaims: {
+      openClaims: true,
       create: async (...args: unknown[]) => {
         seen.push(args);
         return created;
@@ -128,12 +139,17 @@ test("a new claim returns the link and a message to relay; a replay returns neit
   assert.equal(result.emailed, false);
   assert.equal("token" in result, false);
   assert.equal("organizationId" in result.claim, false);
-  assert.match(result.message, /^Send this link to sam@acme\.example\./);
+  assert.match(
+    result.message,
+    /^Your Daykeeper inbox is live\. Until someone claims it, customer messages reach only your AI agent/,
+  );
+  assert.match(result.message, /Send this link to sam@acme\.example\./);
   assert.match(result.message, /expires in 72 hours \(on /);
 
   const emailed = (await tool(names[0]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async () => ({ ...created, emailed: true }),
         list: async () => ({ items: [] }),
         revoke: async () => claim,
@@ -142,11 +158,12 @@ test("a new claim returns the link and a message to relay; a replay returns neit
     { email: "sam@acme.example", idempotencyKey: KEY },
   )) as Record<string, any>;
   assert.equal(emailed.emailed, true);
-  assert.match(emailed.message, /^Daykeeper emailed this link/);
+  assert.match(emailed.message, /is live\. .* Daykeeper emailed this link/);
 
   const replay = (await tool(names[0]!).dispatch(
     {
       workspaceClaims: {
+        openClaims: true,
         create: async () => ({
           claim,
           token: null,
@@ -164,6 +181,72 @@ test("a new claim returns the link and a message to relay; a replay returns neit
   assert.match(replay.message, /daykeeper_workspace_claims_revoke/);
 });
 
+test("without an email the tool issues an open link, and reports who accepted it", async () => {
+  const open = { ...claim, email: null };
+  const seen: unknown[][] = [];
+  const result = (await tool(names[0]!).dispatch(
+    {
+      workspaceClaims: {
+        openClaims: true,
+        create: async (...args: unknown[]) => {
+          seen.push(args);
+          return { ...created, claim: open };
+        },
+        list: async () => ({ items: [open] }),
+        revoke: async () => open,
+      },
+    } as never,
+    { idempotencyKey: KEY },
+  )) as Record<string, any>;
+  assert.deepEqual((seen[0] as unknown[])[0], {});
+  assert.equal(result.claim.email, null);
+  assert.equal(result.claimUrl, created.claimUrl);
+  assert.match(result.message, /customer messages reach only your AI agent/);
+  assert.match(
+    result.message,
+    new RegExp(
+      `open this link and sign in: ${created.claimUrl.replace(/[.?]/g, "\\$&")}`,
+    ),
+  );
+  assert.match(result.message, /for whoever opens it first/);
+
+  // Replaying an open claim somebody accepted names who owns it now.
+  const accepted = (await tool(names[0]!).dispatch(
+    {
+      workspaceClaims: {
+        openClaims: true,
+        create: async () => ({
+          claim: { ...claim, state: "accepted", acceptedAt: claim.createdAt },
+          token: null,
+          claimUrl: null,
+          replayed: true,
+        }),
+        list: async () => ({ items: [] }),
+        revoke: async () => claim,
+      },
+    } as never,
+    { idempotencyKey: KEY },
+  )) as Record<string, any>;
+  assert.equal(accepted.claimUrl, null);
+  assert.match(accepted.message, /^sam@acme\.example claimed this workspace/);
+
+  // An open request answered with somebody's pending address is refused.
+  await assert.rejects(
+    tool(names[0]!).dispatch(
+      {
+        workspaceClaims: {
+          openClaims: true,
+          create: async () => created,
+          list: async () => ({ items: [] }),
+          revoke: async () => claim,
+        },
+      } as never,
+      { idempotencyKey: KEY },
+    ),
+    { code: "INVALID_API_RESPONSE" },
+  );
+});
+
 test("claim inputs and responses are strict", async () => {
   let calls = 0;
   const work = async () => {
@@ -171,7 +254,12 @@ test("claim inputs and responses are strict", async () => {
     return created;
   };
   const client = {
-    workspaceClaims: { create: work, list: work, revoke: work },
+    workspaceClaims: {
+      openClaims: true,
+      create: work,
+      list: work,
+      revoke: work,
+    },
   } as never;
   for (const input of [
     { email: "not-an-address", idempotencyKey: KEY },
@@ -194,6 +282,7 @@ test("claim inputs and responses are strict", async () => {
       tool(names[0]!).dispatch(
         {
           workspaceClaims: {
+            openClaims: true,
             create: async () => response,
             list: work,
             revoke: work,
@@ -264,7 +353,7 @@ test("installed SDK: claim create, list and revoke go to the management API unde
     ]),
     [
       ["POST", `${BASE_URL}/v1/workspace-claims`, KEY],
-      ["GET", `${BASE_URL}/v1/workspace-claims`, null],
+      ["GET", `${BASE_URL}/v1/workspace-claims?include=open`, null],
       ["POST", `${BASE_URL}/v1/workspace-claims/${CLAIM}/revoke`, null],
     ],
   );
@@ -296,4 +385,27 @@ test("installed SDK: an uncertain claim says to list claims and reuse the key", 
   assert.equal(result.error?.mutationOutcome, "unknown");
   assert(result.error?.nextActions.includes("list_workspace_claims"));
   assert(result.error?.nextActions.includes("reuse_original_idempotency_key"));
+});
+
+test("the list tool asks for open links and reads their null address", async () => {
+  const seen: unknown[] = [];
+  const result = (await tool(names[1]!).dispatch(
+    {
+      workspaceClaims: {
+        openClaims: true,
+        create: async () => created,
+        list: async (options: unknown) => {
+          seen.push(options);
+          return { items: [{ ...claim, email: null }, claim] };
+        },
+        revoke: async () => claim,
+      },
+    } as never,
+    {},
+  )) as { claims: { email: string | null }[] };
+  assert.equal((seen[0] as { includeOpen?: boolean }).includeOpen, true);
+  assert.deepEqual(
+    result.claims.map((item) => item.email),
+    [null, "sam@acme.example"],
+  );
 });

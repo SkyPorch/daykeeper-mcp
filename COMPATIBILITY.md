@@ -10,12 +10,18 @@ always be traced back to the contract it was built against.
 
 | daykeeper-mcp | Management contract | Contract tag | Contract commit                            | `@skyporch/daykeeper` |
 | ------------- | ------------------- | ------------ | ------------------------------------------ | --------------------- |
+| 0.5.0         | 1.12.0              | `v1.12.0`    | `79df95836faacdc44967d1a5a0867b725a2c2546` | 0.7.0                 |
 | 0.4.0         | 1.9.0               | `v1.9.0`     | `316497e9d78ed084d96ab39482451d9cc13bbfc9` | 0.6.0                 |
 | 0.3.0         | 1.3.0               | `v1.3.0`     | `067465edfc6c94e63867a6dd0d9db02e12683877` | 0.3.0                 |
 | 0.2.0         | 1.1.0               | `v1.1.0`     | `d2a498187f49e63e687a2d93bd7becf1193bb1e9` | 0.2.0                 |
 
 ## Notes
 
+- 0.5.0 consumes management contract 1.12.0 (tag `v1.12.0`) through
+  `@skyporch/daykeeper` 0.7.0 (tag `v0.7.0`, commit
+  `877e6fbb4545c9e8ec06f2e9aeb8d37378a0ccdf`). Open workspace claims (a claim
+  without `email`) need a server with migration 0122 (`SkyPorch/daykeeper`
+  #314); claim tools refuse an injected SDK older than 0.7.0.
 - 0.4.0 consumes management contract 1.9.0 (tag `v1.9.0`) through
   `@skyporch/daykeeper` 0.6.0 (tag `v0.6.0`, commit
   `569a4ba92f257070fcbbaa636ba1c81583574c2d`). Since 1.3.0 the contract added

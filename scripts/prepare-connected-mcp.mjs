@@ -28,7 +28,7 @@ const run = (command, args, options = {}) =>
     maxBuffer: 8 * 1024 * 1024,
     ...options,
   });
-const REQUIRED_SDK = "0.6.0";
+const REQUIRED_SDK = "0.7.0";
 const SOURCE_FILES = [
   "package.json",
   "pnpm-lock.yaml",

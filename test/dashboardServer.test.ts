@@ -375,6 +375,12 @@ test("candidate SDK: dashboard reads and mutations normalize their main-use cont
       meta?.ui?.resourceUri,
       name === "show_dashboard" ? resourceUri : undefined,
     );
+    assert.equal(
+      (tool.annotations as { openWorldHint?: boolean } | undefined)
+        ?.openWorldHint,
+      name === "send_reply",
+      `${name} openWorldHint`,
+    );
   }
   for (const tool of tools) {
     const meta = (

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 - 2026-10-16
+## 0.5.0 - 2026-10-17
 
 Consumes the Daykeeper MANAGEMENT contract 1.12.0 (tag `v1.12.0`, additive)
 via `@skyporch/daykeeper` 0.7.0. See `COMPATIBILITY.md` for the contract tag

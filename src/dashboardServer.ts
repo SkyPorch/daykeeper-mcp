@@ -112,7 +112,8 @@ function makeToolDescriptor(
       readOnlyHint: meta.effect === "read",
       destructiveHint: false,
       idempotentHint: meta.idempotent,
-      openWorldHint: false,
+      // A sent reply reaches a customer outside Daykeeper.
+      openWorldHint: name === "send_reply",
     },
     securitySchemes,
     _meta: { securitySchemes, ...(attachUi ? { ui: { resourceUri } } : {}) },

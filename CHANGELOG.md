@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The hosted dashboard's `send_reply` tool now sets `openWorldHint: true`,
+  because a sent reply reaches a customer outside Daykeeper. The other nine
+  dashboard tools keep `openWorldHint: false`.
+
 ## 0.5.0 - 2026-10-17
 
 Consumes the Daykeeper MANAGEMENT contract 1.12.0 (tag `v1.12.0`, additive)

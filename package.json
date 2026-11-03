@@ -66,7 +66,7 @@
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
     "@skyporch/daykeeper": "0.7.0",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",
